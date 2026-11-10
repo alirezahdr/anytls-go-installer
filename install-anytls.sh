@@ -4,6 +4,8 @@ umask 077
 export LC_ALL=C
 
 readonly REPO_API='https://api.github.com/repos/anytls/anytls-go/releases/latest'
+readonly PANEL_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/anytls-panel.sh'
+readonly PANEL_FILE='/usr/local/bin/anytls-panel'
 readonly SERVICE_NAME='anytls'
 readonly SERVICE_FILE='/etc/systemd/system/anytls.service'
 readonly CONFIG_DIR='/etc/anytls'
@@ -31,6 +33,29 @@ done
 [[ "$(uname -s)" == 'Linux' ]] || die 'This installer supports Linux only.'
 [[ "$EUID" -eq 0 ]] || die 'Run this script as root: sudo bash install-anytls.sh'
 [[ -d /run/systemd/system ]] || die 'systemd is not active. This installer requires systemd.'
+
+TMP_DIR="$(mktemp -d -t anytls-install.XXXXXXXX)"
+chmod 0700 "$TMP_DIR"
+printf 'Installing the terminal control panel...\n'
+curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
+  "$PANEL_URL" --output "$TMP_DIR/anytls-panel"
+install -o root -g root -m 0755 "$TMP_DIR/anytls-panel" "$PANEL_FILE"
+
+printf '\nChoose what to configure on this server:\n'
+printf '1) Install or reconfigure the AnyTLS-Go server\n'
+printf '2) Set up an Iran-to-abroad SSH forwarding tunnel only\n'
+printf '3) Open the service control panel\n'
+printf '0) Exit\n'
+while true; do
+  read -r -p 'Select an option: ' install_mode
+  case "$install_mode" in
+    1) break ;;
+    2) "$PANEL_FILE" --setup-tunnel; exit ;;
+    3) "$PANEL_FILE"; exit ;;
+    0) exit 0 ;;
+    *) printf 'Invalid option. Enter 1, 2, 3, or 0.\n' >&2 ;;
+  esac
+done
 
 if [[ -e "$SERVICE_FILE" || -e "$CONFIG_FILE" || -e "$BIN_FILE" ]]; then
   printf 'An existing AnyTLS installation was found. Continuing will replace its IP, port, and password settings.\n'
@@ -88,8 +113,6 @@ case "$(uname -m)" in
   *) die "Architecture $(uname -m) is not supported by the official releases. Supported architectures: amd64 and arm64." ;;
 esac
 
-TMP_DIR="$(mktemp -d -t anytls-install.XXXXXXXX)"
-chmod 0700 "$TMP_DIR"
 printf 'Fetching the latest official AnyTLS-Go release information from GitHub...\n'
 curl --fail --silent --show-error --location \
   --retry 3 --connect-timeout 15 --max-time 60 \
@@ -272,12 +295,5 @@ printf '\nAnyTLS-Go %s installation is complete.\n' "$VERSION"
 printf 'Listen address: %s\n' "$LISTEN"
 printf 'Service status: '
 systemctl is-active "$SERVICE_NAME"
-printf '\nService management commands:\n'
-printf '  systemctl status anytls\n'
-printf '  systemctl start anytls\n'
-printf '  systemctl stop anytls\n'
-printf '  systemctl restart anytls\n'
-printf '  systemctl enable anytls\n'
-printf '  systemctl disable anytls\n'
-printf '  journalctl -u anytls -f\n'
-printf '\nAllow TCP port %s in your server firewall and hosting provider firewall.\n' "$PORT"
+printf '\nOpening the terminal control panel...\n'
+"$PANEL_FILE"
