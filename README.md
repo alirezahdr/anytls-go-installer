@@ -1,18 +1,18 @@
-# AnyTLS-Go server installer
+# AnyTLS-Go Server Installer
 
-نصب‌کنندهٔ تعاملی سرور [AnyTLS-Go](https://github.com/anytls/anytls-go) برای Linux با systemd.
+An interactive installer for the [AnyTLS-Go](https://github.com/anytls/anytls-go) server on Linux systems using systemd.
 
-## نصب
+## Install
 
-فایل `install-anytls.sh` را روی سرور کپی کنید و در یک نشست تعاملی SSH اجرا کنید:
+Copy `install-anytls.sh` to the server and run it from an interactive SSH session:
 
 ```bash
 sudo bash install-anytls.sh
 ```
 
-نصب‌کننده آخرین Release پایدار رسمی را از GitHub دریافت می‌کند، IP شنود و پورت را می‌پرسد، رمز حداقل ۱۶ نویسه‌ای را مخفیانه دریافت می‌کند و سرویس `anytls` را نصب و فعال می‌کند. برای شنود روی همهٔ رابط‌های IPv4، IP پیش‌فرض `0.0.0.0` را نگه دارید. پورت انتخابی را در فایروال سرور و پنل ارائه‌دهنده برای TCP باز کنید.
+The installer downloads the latest stable official release from GitHub, prompts for the server listen IP and port, asks for a password of at least 16 characters without echoing it to the terminal, then installs and enables the `anytls` systemd service. Keep the default IP `0.0.0.0` to listen on all IPv4 interfaces. Allow the selected TCP port in both the server firewall and your hosting provider's firewall.
 
-## مدیریت سرویس
+## Manage the service
 
 ```bash
 sudo systemctl status anytls
@@ -24,12 +24,12 @@ sudo systemctl disable anytls
 sudo journalctl -u anytls -f
 ```
 
-سرویس پس از نصب برای اجرای خودکار هنگام راه‌اندازی سیستم فعال می‌شود. فایل تنظیمات رمز در `/etc/anytls/anytls.env` با مجوز root-only ذخیره می‌شود.
+The service is enabled to start automatically at boot. Its password configuration is stored in `/etc/anytls/anytls.env`, readable only by root.
 
-## پیش‌نیازها و محدودیت‌ها
+## Requirements and limitations
 
-- توزیع Linux با systemd و دسترسی root
-- `curl` و `python3`
-- معماری `amd64` یا `arm64`
+- Linux with systemd and root access
+- `curl` and `python3`
+- `amd64` or `arm64` architecture
 
-این نصب‌کننده سرور مرجع AnyTLS-Go را نصب می‌کند؛ مستندات upstream هشدار می‌دهد پیکربندی نمونه با فرض نبود حملهٔ MITM است. پیش از استفادهٔ حساس، ملاحظات امنیتی پروژه را بررسی کنید.
+This installer installs the AnyTLS-Go reference server. The upstream project warns that its sample configuration assumes there is no man-in-the-middle attack. Review the project's security notes before using it for sensitive traffic.
