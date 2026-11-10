@@ -10,6 +10,8 @@ readonly PANEL_FILE='/usr/local/bin/anytls-panel'
 readonly USERS_HELPER_FILE='/usr/local/bin/anytls-users.py'
 readonly SERVICE_NAME='anytls'
 readonly SERVICE_FILE='/etc/systemd/system/anytls.service'
+readonly ANYTLS_DROPIN_DIR='/etc/systemd/system/anytls.service.d'
+readonly TUNNEL_DROPIN_DIR='/etc/systemd/system/anytls-tunnel.service.d'
 readonly CONFIG_DIR='/etc/anytls'
 readonly CONFIG_FILE='/etc/anytls/anytls.env'
 readonly BIN_FILE='/usr/local/bin/anytls-server'
@@ -45,6 +47,26 @@ install -o root -g root -m 0755 "$TMP_DIR/anytls-panel" "$PANEL_FILE"
 curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
   "$USERS_HELPER_URL" --output "$TMP_DIR/anytls-users.py"
 install -o root -g root -m 0755 "$TMP_DIR/anytls-users.py" "$USERS_HELPER_FILE"
+
+dropin_changed=0
+for service_dropin in "anytls:$ANYTLS_DROPIN_DIR" "anytls-tunnel:$TUNNEL_DROPIN_DIR"; do
+  service_name="${service_dropin%%:*}"
+  dropin_dir="${service_dropin#*:}"
+  if systemctl cat "$service_name" >/dev/null 2>&1; then
+    install -d -o root -g root -m 0755 "$dropin_dir"
+    cat > "$TMP_DIR/netlink.conf" <<'UNIT'
+[Service]
+RestrictAddressFamilies=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+UNIT
+    install -o root -g root -m 0644 "$TMP_DIR/netlink.conf" "$dropin_dir/zz-netlink.conf"
+    dropin_changed=1
+  fi
+done
+if (( dropin_changed )); then
+  systemctl daemon-reload
+  printf 'Updated existing service restrictions to allow the required netlink socket family. Restart the affected service to apply the change.\n'
+fi
 
 printf '\nChoose what to configure on this server:\n'
 printf '1) Install or reconfigure the AnyTLS server\n'
@@ -283,7 +305,7 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 

@@ -94,6 +94,22 @@ sudo journalctl -u anytls-tunnel -f
 
 Disabling a service prevents it from starting at boot but does not stop a service that is already running.
 
+### Troubleshooting startup
+
+If `journalctl -u anytls` shows `create netlink socket: address family not supported by protocol`, the systemd address-family allow-list is blocking a socket AnyTLS needs. The quick installer adds a persistent drop-in for existing AnyTLS and GOST services. Restart the affected service after the installer finishes. You can apply the AnyTLS fix manually with:
+
+~~~bash
+sudo install -d -m 0755 /etc/systemd/system/anytls.service.d
+sudo tee /etc/systemd/system/anytls.service.d/zz-netlink.conf >/dev/null <<'UNIT'
+[Service]
+RestrictAddressFamilies=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl reset-failed anytls
+sudo systemctl restart anytls
+~~~
+
 ## Requirements and notes
 
 - Linux with systemd and root or sudo access.
@@ -198,6 +214,22 @@ sudo journalctl -u anytls-tunnel -f
 ~~~
 
 disable اجرای خودکار هنگام بوت را متوقف می‌کند، اما سرویسی را که اکنون فعال است متوقف نمی‌کند.
+
+### عیب‌یابی اجرا
+
+اگر در `journalctl -u anytls` پیام `create netlink socket: address family not supported by protocol` دیدید، فهرست خانواده‌های آدرس systemd جلوی سوکتی را گرفته که AnyTLS به آن نیاز دارد. اجرای دوبارهٔ نصب‌کننده برای سرویس‌های موجود AnyTLS و GOST تنظیم پایدار اضافه می‌کند. پس از پایان، سرویس مربوط را restart کنید. اصلاح دستی AnyTLS:
+
+~~~bash
+sudo install -d -m 0755 /etc/systemd/system/anytls.service.d
+sudo tee /etc/systemd/system/anytls.service.d/zz-netlink.conf >/dev/null <<'UNIT'
+[Service]
+RestrictAddressFamilies=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl reset-failed anytls
+sudo systemctl restart anytls
+~~~
 
 ## پیش‌نیازها و نکته‌ها
 
