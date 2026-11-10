@@ -159,6 +159,16 @@ def build_server_config(users, listen):
     address, port = parse_listen(listen)
     if not users:
         raise ValueError("At least one active account is required.")
+    route = {"final": "direct"}
+    if shutil.which("ip"):
+        result = run(["ip", "-4", "route", "show", "default"], check=False, capture=True)
+        for line in result.stdout.splitlines():
+            fields = line.split()
+            if "dev" in fields:
+                interface = fields[fields.index("dev") + 1]
+                if re.fullmatch(r"[A-Za-z0-9_.:-]{1,15}", interface):
+                    route["default_interface"] = interface
+                    break
     return {
         "log": {"level": "info", "timestamp": True},
         "inbounds": [
@@ -172,7 +182,7 @@ def build_server_config(users, listen):
             }
         ],
         "outbounds": [{"type": "direct", "tag": "direct"}],
-        "route": {"final": "direct"},
+        "route": route,
     }
 
 
