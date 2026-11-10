@@ -84,11 +84,10 @@ if (( OPEN_PANEL )); then
   curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
     "$USERS_HELPER_URL" --output "$TMP_DIR/anytls-users.py"
   install -o root -g root -m 0755 "$TMP_DIR/anytls-users.py" "$USERS_HELPER_FILE"
-  if [[ "${BASH_SOURCE[0]}" != "$INSTALLER_FILE" ]]; then
-    curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
-      "$INSTALLER_URL" --output "$TMP_DIR/anytls-installer"
-    install -o root -g root -m 0755 "$TMP_DIR/anytls-installer" "$INSTALLER_FILE"
-  fi
+  curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
+    "$INSTALLER_URL" --output "$TMP_DIR/anytls-installer"
+  install -o root -g root -m 0755 "$TMP_DIR/anytls-installer" "$INSTALLER_FILE.new"
+  mv -f -- "$INSTALLER_FILE.new" "$INSTALLER_FILE"
 fi
 
 dropin_changed=0
