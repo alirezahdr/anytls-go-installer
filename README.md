@@ -54,7 +54,7 @@ The wizard downloads the latest stable GOST release for Linux amd64 or arm64 fro
 
 The upstream AnyTLS-Go server accepts one shared password. To manage multiple passwords on the same AnyTLS port, open **AnyTLS server → Manage accounts and client configs** in the TUI. The panel asks to migrate the server to the official sing-box AnyTLS backend and keeps the existing password as the first account. sing-box supports multiple named AnyTLS users on one inbound listener.
 
-The account menu can add and revoke accounts, set an expiry in days, and export Android, iOS, and Windows sing-box JSON files. Expired accounts are removed automatically about once per minute. New passwords are shown once when created. The JSON and QR image are saved under /root/anytls-clients; protect them as credentials and copy them securely to each device.
+The account menu can add and revoke accounts, set an expiry in days, and export Android, iOS, and Windows sing-box JSON files. After export, choose a platform in the TUI to print its complete JSON in the terminal for copying; the files are also saved under /root/anytls-clients. Expired accounts are removed automatically about once per minute. New passwords are shown once when created. Treat the JSON and QR image as credentials and copy them securely to each device.
 
 The QR image contains a de-facto AnyTLS share URI for apps that support URI import. Other sing-box apps can import the generated JSON file. The JSON pins the self-signed server certificate's public key, so it verifies that the client reaches this server. Re-export client files if the server certificate is replaced. QR URI import support and certificate handling vary by client; use the JSON profile when URI import does not connect.
 
@@ -114,7 +114,7 @@ sudo systemctl restart anytls
 
 - Linux with systemd and root or sudo access.
 - curl, Python 3, and standard account utilities.
-- OpenSSL is required to migrate the server to multi-user mode and export pinned client profiles. qrencode is optional for QR images; JSON export works without it, and the TUI can offer to install it through a supported system package manager.
+- The installer installs qrencode automatically when installing or opening the AnyTLS panel, so QR export is ready to use. Supported package managers are apt, dnf, yum, zypper, and apk. OpenSSL is required to migrate the server to multi-user mode and export pinned client profiles.
 - GOST forwarding supports Linux amd64 and arm64.
 - The account and migration tools support Linux amd64 and arm64.
 - The forwarder listens on the IP selected in the wizard. Use **0.0.0.0** to accept connections on all IPv4 interfaces; restrict access through firewalls as needed.
@@ -173,7 +173,7 @@ GOST جریان TCP را به آدرس و پورت سرور خارج منتقل 
 
 سرور AnyTLS-Go اصلی فقط یک رمز مشترک می‌پذیرد. برای چند رمز روی یک پورت، در TUI مسیر **AnyTLS server → Manage accounts and client configs** را باز کنید. پنل با تأیید شما سرور را به پیاده‌سازی رسمی AnyTLS در sing-box منتقل می‌کند و رمز فعلی را به‌عنوان حساب اول نگه می‌دارد. sing-box چند کاربر نام‌دار را روی یک ورودی و پورت پشتیبانی می‌کند.
 
-از منوی حساب‌ها می‌توانید کاربر اضافه یا حذف کنید، مدت اعتبار را برحسب روز تعیین کنید و فایل JSON sing-box برای Android، iOS و Windows بسازید. حساب منقضی‌شده تقریباً هر یک دقیقه به‌طور خودکار حذف می‌شود. رمز جدید فقط یک‌بار پس از ساخت نمایش داده می‌شود. فایل‌های JSON و تصویر QR در مسیر /root/anytls-clients ذخیره می‌شوند؛ آن‌ها را مثل اطلاعات ورود محرمانه نگه دارید و امن به دستگاه‌ها منتقل کنید.
+از منوی حساب‌ها می‌توانید کاربر اضافه یا حذف کنید، مدت اعتبار را برحسب روز تعیین کنید و فایل JSON sing-box برای Android، iOS و Windows بسازید. پس از خروجی گرفتن، در TUI سیستم‌عامل را انتخاب کنید تا متن کامل JSON در ترمینال نمایش داده شود و بتوانید آن را کپی کنید؛ فایل‌ها در مسیر /root/anytls-clients هم ذخیره می‌شوند. حساب منقضی‌شده تقریباً هر یک دقیقه به‌طور خودکار حذف می‌شود. رمز جدید فقط یک‌بار پس از ساخت نمایش داده می‌شود. JSON و تصویر QR را مثل اطلاعات ورود محرمانه نگه دارید و امن به دستگاه‌ها منتقل کنید.
 
 QR شامل URI متداول AnyTLS برای برنامه‌هایی است که واردکردن URI را پشتیبانی می‌کنند. در بقیهٔ برنامه‌های sing-box فایل JSON را وارد کنید. JSON اثرانگشت کلید عمومی گواهی خودامضای سرور را pin می‌کند تا کلاینت همان سرور را اعتبارسنجی کند. اگر گواهی سرور عوض شد، فایل‌های کلاینت را دوباره بسازید. پشتیبانی QR و اعتبارسنجی گواهی بین برنامه‌ها فرق دارد؛ اگر URI وصل نشد، پروفایل JSON را وارد کنید.
 
@@ -235,7 +235,7 @@ sudo systemctl restart anytls
 
 - لینوکس دارای systemd و دسترسی root یا sudo.
 - curl، Python 3 و ابزارهای استاندارد مدیریت حساب.
-- برای مهاجرت به حالت چندکاربره و ساخت پروفایل pin‌شده OpenSSL لازم است. qrencode برای تصویر QR اختیاری است؛ خروجی JSON بدون آن هم ساخته می‌شود و TUI می‌تواند نصبش را با package manager پشتیبانی‌شده پیشنهاد کند.
+- نصب‌کننده هنگام نصب AnyTLS یا بازکردن پنل، qrencode را خودکار نصب می‌کند تا خروجی QR آماده باشد. package managerهای پشتیبانی‌شده apt، dnf، yum، zypper و apk هستند. برای مهاجرت به حالت چندکاربره و ساخت پروفایل pin‌شده OpenSSL لازم است.
 - فوروارد GOST از Linux amd64 و arm64 پشتیبانی می‌کند.
 - فوروارد روی IP انتخاب‌شده در راهنما شنود می‌کند. برای پذیرش اتصال روی همهٔ رابط‌های IPv4 مقدار **0.0.0.0** را انتخاب کنید و دسترسی را با فایروال محدود کنید.
 - پورت ورودی باید روی سرور ایران آزاد باشد.

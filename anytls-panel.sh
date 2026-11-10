@@ -203,7 +203,7 @@ valid_days() {
 }
 
 account_menu() {
-  local choice name days confirmation password server port sni export_text uri qr_path
+  local choice name days confirmation password server port sni export_text uri qr_path show_choice
   local -a export_info
   if [[ ! -x "$MULTIUSER_HELPER" ]]; then
     fail 'Account management helper is missing. Run the latest quick installer to update the panel files.'
@@ -306,6 +306,9 @@ PY
           elif command -v yum >/dev/null 2>&1; then
             read -r -p 'Install qrencode now? (yes/no): ' confirmation
             if [[ "$confirmation" == 'yes' ]]; then yum install -y qrencode || true; fi
+          elif command -v zypper >/dev/null 2>&1; then
+            read -r -p 'Install qrencode now? (yes/no): ' confirmation
+            if [[ "$confirmation" == 'yes' ]]; then zypper --non-interactive install qrencode || true; fi
           elif command -v apk >/dev/null 2>&1; then
             read -r -p 'Install qrencode now? (yes/no): ' confirmation
             if [[ "$confirmation" == 'yes' ]]; then apk add qrencode || true; fi
@@ -329,6 +332,24 @@ PY
         else
           printf '\n%sNo QR image was created. Install qrencode and retry if you also need a QR code.%s\n' "$YELLOW" "$RESET"
         fi
+        printf '\nSelect a profile to print as plain JSON for copying from this terminal:\n'
+        menu_item 1 'Show Android JSON'
+        menu_item 2 'Show iOS JSON'
+        menu_item 3 'Show Windows JSON'
+        menu_item 0 'Skip'
+        while true; do
+          read -r -p 'Select an option: ' show_choice
+          case "$show_choice" in
+            1|2|3|0) break ;;
+            *) printf '%sInvalid option.%s\n' "$YELLOW" "$RESET" ;;
+          esac
+        done
+        case "$show_choice" in
+          1) header; printf 'Android sing-box JSON — copy the JSON text below:\n\n'; cat "${export_info[1]}" ;;
+          2) header; printf 'iOS sing-box JSON — copy the JSON text below:\n\n'; cat "${export_info[2]}" ;;
+          3) header; printf 'Windows sing-box JSON — copy the JSON text below:\n\n'; cat "${export_info[3]}" ;;
+          0) ;;
+        esac
         unset uri export_info
         pause
         ;;

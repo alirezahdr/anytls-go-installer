@@ -30,6 +30,27 @@ die() {
   exit 1
 }
 
+ensure_qrencode() {
+  command -v qrencode >/dev/null 2>&1 && return 0
+  printf 'Installing qrencode, required for AnyTLS QR exports...\n'
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update || return 1
+    apt-get install -y qrencode || return 1
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y qrencode || return 1
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y qrencode || return 1
+  elif command -v zypper >/dev/null 2>&1; then
+    zypper --non-interactive install qrencode || return 1
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache qrencode || return 1
+  else
+    printf 'No supported package manager found to install qrencode.\n' >&2
+    return 1
+  fi
+  command -v qrencode >/dev/null 2>&1
+}
+
 for command_name in curl python3 base64 systemctl useradd getent install id; do
   command -v "$command_name" >/dev/null 2>&1 || die "Required command not found: $command_name"
 done
@@ -78,11 +99,19 @@ while true; do
   case "$install_mode" in
     1) break ;;
     2) "$PANEL_FILE" --setup-forward; exit ;;
-    3) "$PANEL_FILE"; exit ;;
+    3)
+      if systemctl cat "$SERVICE_NAME" >/dev/null 2>&1; then
+        ensure_qrencode || die 'Could not install qrencode. Install it with your Linux package manager, then reopen the panel.'
+      fi
+      "$PANEL_FILE"
+      exit
+      ;;
     0) exit 0 ;;
     *) printf 'Invalid option. Enter 1, 2, 3, or 0.\n' >&2 ;;
   esac
 done
+
+ensure_qrencode || die 'Could not install qrencode. AnyTLS installation stopped; install qrencode with your Linux package manager and retry.'
 
 if [[ -s /etc/anytls/users.json ]]; then
   printf '\nMulti-user sing-box mode is already configured. Opening the control panel without replacing the server backend.\n'
