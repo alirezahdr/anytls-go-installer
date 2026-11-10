@@ -2,15 +2,17 @@
 
 An interactive installer for the [AnyTLS-Go](https://github.com/anytls/anytls-go) server on Linux systems using systemd.
 
-## Install
+## Quick install
 
-Copy `install-anytls.sh` to the server and run it from an interactive SSH session:
+Run this in an interactive SSH session. It downloads the installer from this repository to a temporary file, runs it, and removes the temporary file when it exits:
 
 ```bash
-sudo bash install-anytls.sh
+tmp_script="$(mktemp)" || exit 1
+trap 'rm -f "$tmp_script"' EXIT
+curl -fsSL "https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/install-anytls.sh" -o "$tmp_script" && sudo bash "$tmp_script"
 ```
 
-The installer downloads the latest stable official release from GitHub, prompts for the server listen IP and port, asks for a password of at least 16 characters without echoing it to the terminal, then installs and enables the `anytls` systemd service. Keep the default IP `0.0.0.0` to listen on all IPv4 interfaces. Allow the selected TCP port in both the server firewall and your hosting provider's firewall.
+The installer downloads the latest stable official AnyTLS-Go release from GitHub, prompts for the server listen IP and port, asks for a password of at least 16 characters without echoing it to the terminal, then installs and enables the `anytls` systemd service. Keep the default IP `0.0.0.0` to listen on all IPv4 interfaces. Allow the selected TCP port in both the server firewall and your hosting provider's firewall.
 
 ## Manage the service
 
