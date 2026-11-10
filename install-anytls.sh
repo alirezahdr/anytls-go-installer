@@ -6,8 +6,10 @@ export LC_ALL=C
 readonly REPO_API='https://api.github.com/repos/anytls/anytls-go/releases/latest'
 readonly PANEL_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/anytls-panel.sh'
 readonly USERS_HELPER_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/anytls-users.py'
+readonly INSTALLER_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/install-anytls.sh'
 readonly PANEL_FILE='/usr/local/bin/anytls-panel'
 readonly USERS_HELPER_FILE='/usr/local/bin/anytls-users.py'
+readonly INSTALLER_FILE='/usr/local/libexec/anytls-installer'
 readonly SERVICE_NAME='anytls'
 readonly SERVICE_FILE='/etc/systemd/system/anytls.service'
 readonly ANYTLS_DROPIN_DIR='/etc/systemd/system/anytls.service.d'
@@ -29,6 +31,19 @@ die() {
   printf 'Error: %s\n' "$*" >&2
   exit 1
 }
+
+INSTALL_ANYTLS=0
+OPEN_PANEL=1
+for argument in "$@"; do
+  case "$argument" in
+    --install-anytls) INSTALL_ANYTLS=1 ;;
+    --no-panel) OPEN_PANEL=0 ;;
+    *) die "Unknown argument: $argument" ;;
+  esac
+done
+if (( ! OPEN_PANEL && ! INSTALL_ANYTLS )); then
+  die '--no-panel can only be used together with --install-anytls.'
+fi
 
 ensure_qrencode() {
   command -v qrencode >/dev/null 2>&1 && return 0
@@ -61,13 +76,20 @@ done
 
 TMP_DIR="$(mktemp -d -t anytls-install.XXXXXXXX)"
 chmod 0700 "$TMP_DIR"
-printf 'Installing the terminal control panel...\n'
-curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
-  "$PANEL_URL" --output "$TMP_DIR/anytls-panel"
-install -o root -g root -m 0755 "$TMP_DIR/anytls-panel" "$PANEL_FILE"
-curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
-  "$USERS_HELPER_URL" --output "$TMP_DIR/anytls-users.py"
-install -o root -g root -m 0755 "$TMP_DIR/anytls-users.py" "$USERS_HELPER_FILE"
+install -d -o root -g root -m 0755 /usr/local/libexec
+if (( OPEN_PANEL )); then
+  curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
+    "$PANEL_URL" --output "$TMP_DIR/anytls-panel"
+  install -o root -g root -m 0755 "$TMP_DIR/anytls-panel" "$PANEL_FILE"
+  curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
+    "$USERS_HELPER_URL" --output "$TMP_DIR/anytls-users.py"
+  install -o root -g root -m 0755 "$TMP_DIR/anytls-users.py" "$USERS_HELPER_FILE"
+  if [[ "${BASH_SOURCE[0]}" != "$INSTALLER_FILE" ]]; then
+    curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
+      "$INSTALLER_URL" --output "$TMP_DIR/anytls-installer"
+    install -o root -g root -m 0755 "$TMP_DIR/anytls-installer" "$INSTALLER_FILE"
+  fi
+fi
 
 dropin_changed=0
 for service_dropin in "anytls:$ANYTLS_DROPIN_DIR" "anytls-tunnel:$TUNNEL_DROPIN_DIR"; do
@@ -86,36 +108,21 @@ UNIT
 done
 if (( dropin_changed )); then
   systemctl daemon-reload
-  printf 'Updated existing service restrictions to allow the required netlink socket family. Restart the affected service to apply the change.\n'
 fi
 
-printf '\nChoose what to configure on this server:\n'
-printf '1) Install or reconfigure the AnyTLS server\n'
-printf '2) Set up direct Iran-to-abroad TCP forwarding with GOST\n'
-printf '3) Open the service control panel\n'
-printf '0) Exit\n'
-while true; do
-  read -r -p 'Select an option: ' install_mode
-  case "$install_mode" in
-    1) break ;;
-    2) "$PANEL_FILE" --setup-forward; exit ;;
-    3)
-      if systemctl cat "$SERVICE_NAME" >/dev/null 2>&1; then
-        ensure_qrencode || die 'Could not install qrencode. Install it with your Linux package manager, then reopen the panel.'
-      fi
-      "$PANEL_FILE"
-      exit
-      ;;
-    0) exit 0 ;;
-    *) printf 'Invalid option. Enter 1, 2, 3, or 0.\n' >&2 ;;
-  esac
-done
+if (( ! INSTALL_ANYTLS )); then
+  if systemctl cat "$SERVICE_NAME" >/dev/null 2>&1; then
+    ensure_qrencode || die 'Could not install qrencode. Install it with your Linux package manager, then reopen the panel.'
+  fi
+  "$PANEL_FILE"
+  exit 0
+fi
 
 ensure_qrencode || die 'Could not install qrencode. AnyTLS installation stopped; install qrencode with your Linux package manager and retry.'
 
 if [[ -s /etc/anytls/users.json ]]; then
-  printf '\nMulti-user sing-box mode is already configured. Opening the control panel without replacing the server backend.\n'
-  "$PANEL_FILE"
+  printf '\nMulti-user sing-box mode is already configured. The existing backend will be preserved.\n'
+  if (( OPEN_PANEL )); then "$PANEL_FILE"; fi
   exit 0
 fi
 
@@ -357,5 +364,7 @@ printf '\nAnyTLS-Go %s installation is complete.\n' "$VERSION"
 printf 'Listen address: %s\n' "$LISTEN"
 printf 'Service status: '
 systemctl is-active "$SERVICE_NAME"
-printf '\nOpening the terminal control panel...\n'
-"$PANEL_FILE"
+if (( OPEN_PANEL )); then
+  printf '\n'
+  "$PANEL_FILE"
+fi

@@ -7,6 +7,7 @@ readonly ANYTLS_UNIT='anytls'
 readonly ANYTLS_CONFIG='/etc/anytls/anytls.env'
 readonly USERS_DB='/etc/anytls/users.json'
 readonly MULTIUSER_HELPER='/usr/local/bin/anytls-users.py'
+readonly INSTALLER_FILE='/usr/local/libexec/anytls-installer'
 readonly TUNNEL_UNIT='anytls-tunnel'
 readonly TUNNEL_USER='anytls-tunnel'
 readonly TUNNEL_DIR='/etc/anytls-tunnel'
@@ -450,26 +451,37 @@ anytls_menu() {
     header
     backend="$(read_config_value ANYTLS_BACKEND "$ANYTLS_CONFIG")"
     printf '%sAnyTLS server (%s backend)%s\n\n' "$GREEN" "${backend:-AnyTLS-Go}" "$RESET"
-    menu_item 1 'Manage service'
-    if [[ "$backend" == 'sing-box' ]]; then
-      menu_item 2 'Reconfigure listen IP and port'
+    if unit_installed "$ANYTLS_UNIT"; then
+      menu_item 1 'Manage service'
+      if [[ "$backend" == 'sing-box' ]]; then
+        menu_item 2 'Reconfigure listen IP and port'
+      else
+        menu_item 2 'Reconfigure listen IP, port, and password'
+      fi
+      menu_item 3 'Manage accounts and client configs'
     else
-      menu_item 2 'Reconfigure listen IP, port, and password'
+      printf '%sAnyTLS server is not installed on this machine.%s\n\n' "$YELLOW" "$RESET"
+      menu_item 1 'Install AnyTLS server'
     fi
-    menu_item 3 'Manage accounts and client configs'
     menu_item 0 'Back'
     read -r -p 'Select an option: ' choice
     case "$choice" in
       1)
         if unit_installed "$ANYTLS_UNIT"; then
           unit_menu "$ANYTLS_UNIT" 'AnyTLS server'
+        elif [[ -x "$INSTALLER_FILE" ]]; then
+          "$INSTALLER_FILE" --install-anytls --no-panel || true
         else
-          printf '%sAnyTLS server is not installed on this machine.%s\n' "$YELLOW" "$RESET"
+          fail 'The installer component is missing. Run the quick install command again to update this panel.'
           pause
         fi
         ;;
-      2) reconfigure_anytls ;;
-      3) account_menu ;;
+      2)
+        if unit_installed "$ANYTLS_UNIT"; then reconfigure_anytls; else printf '%sInvalid option.%s\n' "$YELLOW" "$RESET"; sleep 1; fi
+        ;;
+      3)
+        if unit_installed "$ANYTLS_UNIT"; then account_menu; else printf '%sInvalid option.%s\n' "$YELLOW" "$RESET"; sleep 1; fi
+        ;;
       0) return ;;
       *) printf '%sInvalid option.%s\n' "$YELLOW" "$RESET"; sleep 1 ;;
     esac

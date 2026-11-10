@@ -6,7 +6,7 @@
 
 ## English
 
-Install the latest stable AnyTLS-Go release on Linux with systemd, manage its service from an interactive terminal panel, or configure a direct TCP forward on an Iran-side server with GOST.
+Install the interactive control panel on Linux with systemd. From the panel, install or manage AnyTLS, configure a direct TCP forward on an Iran-side server with GOST, or view the command reference.
 
 ## Quick install
 
@@ -16,13 +16,7 @@ Run this single line in an interactive Linux terminal:
 installer=$(curl -fsSL https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/install-anytls.sh) && sudo bash -c "$installer"
 ~~~
 
-The installer offers three choices:
-
-1. **Install or reconfigure the AnyTLS server** — installs the official AnyTLS-Go server with a single password, or opens the control panel without replacing an existing multi-user sing-box backend.
-2. **Set up direct forwarding with GOST** — configure an Iran-side entry point that forwards TCP to an AnyTLS server abroad. This does not install AnyTLS on the Iran server.
-3. **Open the control panel** — manage the services already configured on this machine.
-
-After installing the AnyTLS server, the panel opens automatically. Start it later with:
+The control panel opens directly after quick installation. Choose **AnyTLS server management** to install or configure the server when needed, or **Direct Iran-to-abroad TCP forwarding management (GOST)** to configure the Iran-side entry point. Both workflows are available from this same panel. Start it later with:
 
 ~~~bash
 sudo anytls-panel
@@ -127,7 +121,7 @@ sudo systemctl restart anytls
 
 ## فارسی
 
-آخرین نسخهٔ پایدار AnyTLS-Go را روی لینوکس دارای systemd نصب کنید، سرویس را از پنل تعاملی مدیریت کنید یا روی سرور ایران با GOST فوروارد مستقیم TCP به سرور AnyTLS خارج بسازید.
+پنل تعاملی را روی لینوکس دارای systemd نصب کنید. از داخل پنل می‌توانید AnyTLS را نصب یا مدیریت کنید، روی سرور ایران فوروارد مستقیم TCP با GOST بسازید یا راهنمای فرمان‌ها را ببینید.
 
 ## نصب سریع
 
@@ -137,13 +131,7 @@ sudo systemctl restart anytls
 installer=$(curl -fsSL https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/install-anytls.sh) && sudo bash -c "$installer"
 ~~~
 
-نصب‌کننده سه گزینه دارد:
-
-1. **نصب یا تنظیم دوبارهٔ سرور AnyTLS** — سرور رسمی AnyTLS-Go تک‌رمزی را نصب می‌کند؛ اگر سرور چندکاربرهٔ sing-box از قبل فعال باشد، پنل را بدون جایگزین‌کردن آن باز می‌کند.
-2. **راه‌اندازی فوروارد مستقیم با GOST** — سرور ایران را به ورودی اتصال تبدیل می‌کند و TCP را به AnyTLS روی سرور خارج می‌فرستد. در این حالت AnyTLS روی سرور ایران نصب نمی‌شود.
-3. **بازکردن پنل مدیریت** — سرویس‌های تنظیم‌شده را مدیریت می‌کند.
-
-پس از نصب سرور AnyTLS، پنل خودکار باز می‌شود. برای اجرای دوباره:
+پس از نصب سریع، پنل اصلی مستقیم باز می‌شود. برای نصب یا تنظیم سرور، **AnyTLS server management** را انتخاب کنید؛ برای ساخت ورودی ایران، **Direct Iran-to-abroad TCP forwarding management (GOST)** را بزنید. هر دو کار از همین پنل انجام می‌شوند. برای اجرای دوبارهٔ پنل:
 
 ~~~bash
 sudo anytls-panel
