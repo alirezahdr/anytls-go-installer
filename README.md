@@ -6,7 +6,7 @@
 
 ## English
 
-Install the latest stable AnyTLS-Go release on Linux with systemd, manage its service from an interactive terminal panel, or configure an SSH TCP forward on an Iran-side server to reach an AnyTLS server abroad.
+Install the latest stable AnyTLS-Go release on Linux with systemd, manage its service from an interactive terminal panel, or configure a direct TCP forward on an Iran-side server with GOST.
 
 ## Quick install
 
@@ -16,55 +16,52 @@ Run this single line in an interactive Linux terminal:
 installer=$(curl -fsSL https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/install-anytls.sh) && sudo bash -c "$installer"
 ~~~
 
-The installer asks which role this server should perform:
+The installer offers three choices:
 
-1. **AnyTLS server** — downloads the latest stable official release and asks for the listen IP, port, and password.
-2. **Iran-to-abroad SSH tunnel** — configures this server as the client-facing TCP entrypoint and forwards connections over SSH to AnyTLS running abroad. It does not install a local AnyTLS server.
-3. **Control panel** — opens the service menus without changing the current configuration.
+1. **Install or reconfigure AnyTLS-Go** — downloads the latest stable official release and asks for the server listen IP, port, and password.
+2. **Set up direct forwarding with GOST** — configure an Iran-side entry point that forwards TCP to an AnyTLS server abroad. This does not install AnyTLS on the Iran server.
+3. **Open the control panel** — manage the services already configured on this machine.
 
-After a server installation, the panel opens automatically. Start it later with:
+After installing the AnyTLS server, the panel opens automatically. Start it later with:
 
 ~~~bash
 sudo anytls-panel
 ~~~
 
-The command downloads the installer into a shell variable, then runs it with root privileges while keeping the terminal available for the interactive prompts. Review the installer and panel source before using them on a production server.
+The TUI prompts and menus are in English.
 
-## What the panel can do
+## Iran-to-abroad direct forwarding
 
-- Show status and start, stop, restart, enable at boot, or disable at boot for the AnyTLS server.
-- Follow or review AnyTLS service logs.
-- Change the AnyTLS server listen IP, port, and password.
-- Set up or update the Iran-to-abroad SSH TCP forward.
-- Show status and control the tunnel service, and inspect its non-secret connection settings.
-- Display the equivalent systemd commands.
-
-The TUI prompts and menu are in English.
-
-## Iran-to-abroad forwarding
-
-The tunnel direction is:
+The data path is:
 
 ~~~text
-AnyTLS clients → Iran server IP:port → SSH connection → AnyTLS host:port reachable from the foreign server
+AnyTLS client → Iran server IP:port → GOST TCP forward → foreign AnyTLS server IP:port
 ~~~
 
-In the installer menu, select **Iran-to-abroad SSH tunnel**. The wizard asks for:
+Choose **Set up direct Iran-to-abroad TCP forwarding with GOST**. The wizard asks for:
 
-- The foreign server's SSH host, port, and account name.
-- The listen IP and client-facing port on the Iran server.
-- The AnyTLS host and port as reachable from the foreign server. Use 127.0.0.1 when AnyTLS listens on that same foreign server.
-- SSH key authorization and SSH host-key verification.
+- The foreign AnyTLS server address (IP or DNS name).
+- The AnyTLS TCP port.
+- The listen IP on the Iran server.
 
-The wizard creates a dedicated Ed25519 key and displays its public key. Add that key to the selected account's authorized_keys file on the foreign server. The foreign sshd must allow local TCP forwarding to the configured AnyTLS destination; use AllowTcpForwarding local and, where appropriate, restrict PermitOpen to the required host and port. The wizard does not change the foreign server.
+The Iran entry port is set to the same number as the foreign AnyTLS port. In the client profile, replace only the server address with the **public IP of the Iran server**. Keep the existing port and AnyTLS password.
 
-The tunnel runs as the anytls-tunnel systemd service, starts at boot, and reconnects after a connection failure. Before trusting the foreign SSH host key, independently verify the fingerprint shown by the wizard using the foreign server console or another trusted channel.
+GOST relays the TCP stream to the configured foreign address and port; it does not need the AnyTLS password. The AnyTLS server must already be running abroad and reachable from the Iran server. Open the selected inbound TCP port in the Iran server firewall and provider firewall, and allow the Iran server to reach the foreign AnyTLS destination.
 
-Clients connect to the **public IP of the Iran server** on the selected local port, using the AnyTLS password configured on the foreign AnyTLS server. Allow inbound TCP on that port in both the Iran server's firewall and its hosting provider firewall. The SSH port on the foreign server must be reachable outbound from Iran.
+The wizard downloads the latest stable GOST release for Linux amd64 or arm64 from the official project and checks its SHA-256 digest before installing it. Forwarding runs as a systemd service, starts at boot, and restarts automatically after a failure. The service unit keeps the name anytls-tunnel for compatibility with the existing panel commands.
+
+## Panel features
+
+- Show status and start, stop, restart, enable at boot, or disable at boot for the AnyTLS server and forwarding service.
+- Review or follow service logs.
+- Change the AnyTLS server listen IP, port, and password.
+- Set up or update the direct GOST TCP forward.
+- View the non-secret forwarding address and port.
+- Display the equivalent systemd commands.
 
 ## Service commands
 
-The same actions are available from the TUI. You can also run them directly:
+These commands are also available from the TUI:
 
 ~~~bash
 sudo systemctl status anytls
@@ -84,20 +81,15 @@ sudo systemctl disable anytls-tunnel
 sudo journalctl -u anytls-tunnel -f
 ~~~
 
-The tunnel commands apply after you configure the SSH forward. Disabling a service prevents boot startup but does not stop a service that is already running.
+Disabling a service prevents it from starting at boot but does not stop a service that is already running.
 
-## Requirements
+## Requirements and notes
 
 - Linux with systemd and root or sudo access.
-- The installer requires curl, python3, base64, and standard account utilities.
-- For the SSH tunnel, the OpenSSH client commands ssh, ssh-keygen, and ssh-keyscan must be installed. If the panel reports one missing, install your distribution's OpenSSH client package and run the setup again.
-- AnyTLS-Go official release archives are selected for amd64 or arm64.
-
-## Security notes
-
-- The SSH tunnel listens on the IP you select. Use 0.0.0.0 only when clients should connect through the server's network interfaces, and restrict access with the server and provider firewalls.
-- The tunnel uses a dedicated private key stored under /etc/anytls-tunnel with restrictive permissions. The AnyTLS password is not copied into the tunnel configuration.
-- Verify the remote SSH host-key fingerprint independently before accepting it.
+- curl, Python 3, and standard account utilities.
+- GOST forwarding supports Linux amd64 and arm64.
+- The forwarder listens on the IP selected in the wizard. Use **0.0.0.0** to accept connections on all IPv4 interfaces; restrict access through firewalls as needed.
+- The listen port must be available on the Iran server.
 - AnyTLS-Go describes itself as a reference implementation and warns that its sample configuration assumes there is no man-in-the-middle attack. Read the [upstream project documentation](https://github.com/anytls/anytls-go) before using it for sensitive traffic.
 
 ---
@@ -106,7 +98,7 @@ The tunnel commands apply after you configure the SSH forward. Disabling a servi
 
 ## فارسی
 
-آخرین نسخهٔ پایدار AnyTLS-Go را روی لینوکس و systemd نصب کنید، سرویس را از پنل تعاملی ترمینال مدیریت کنید، یا روی سرور ایران یک فوروارد TCP از طریق SSH به AnyTLS روی سرور خارج بسازید.
+آخرین نسخهٔ پایدار AnyTLS-Go را روی لینوکس دارای systemd نصب کنید، سرویس را از پنل تعاملی مدیریت کنید یا روی سرور ایران با GOST فوروارد مستقیم TCP به سرور AnyTLS خارج بسازید.
 
 ## نصب سریع
 
@@ -116,55 +108,52 @@ The tunnel commands apply after you configure the SSH forward. Disabling a servi
 installer=$(curl -fsSL https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/install-anytls.sh) && sudo bash -c "$installer"
 ~~~
 
-نصب‌کننده می‌پرسد این سرور چه نقشی داشته باشد:
+نصب‌کننده سه گزینه دارد:
 
-1. **سرور AnyTLS** — آخرین نسخهٔ پایدار رسمی را می‌گیرد و IP شنود، پورت و رمز را می‌پرسد.
-2. **تونل SSH از ایران به خارج** — این سرور را به نقطهٔ ورودی کاربران تبدیل می‌کند و اتصال‌ها را از طریق SSH به AnyTLS روی سرور خارج فوروارد می‌کند. در این حالت AnyTLS روی سرور ایران نصب نمی‌شود.
-3. **پنل مدیریت** — منوهای سرویس را باز می‌کند و پیکربندی فعلی را تغییر نمی‌دهد.
+1. **نصب یا تنظیم دوبارهٔ AnyTLS-Go** — آخرین نسخهٔ پایدار رسمی را می‌گیرد و IP شنود، پورت و رمز سرور را می‌پرسد.
+2. **راه‌اندازی فوروارد مستقیم با GOST** — سرور ایران را به ورودی اتصال تبدیل می‌کند و TCP را به AnyTLS روی سرور خارج می‌فرستد. در این حالت AnyTLS روی سرور ایران نصب نمی‌شود.
+3. **بازکردن پنل مدیریت** — سرویس‌های تنظیم‌شده را مدیریت می‌کند.
 
-پس از نصب سرور، پنل خودکار باز می‌شود. برای اجرای دوبارهٔ آن:
+پس از نصب سرور AnyTLS، پنل خودکار باز می‌شود. برای اجرای دوباره:
 
 ~~~bash
 sudo anytls-panel
 ~~~
 
-این فرمان ابتدا نصب‌کننده را در یک متغیر پوسته دریافت می‌کند، سپس آن را با دسترسی root اجرا می‌کند و ورودی ترمینال را برای پرسش‌های تعاملی باز نگه می‌دارد. پیش از استفاده روی سرور عملیاتی، سورس نصب‌کننده و پنل را بررسی کنید.
+منو و پرسش‌های TUI انگلیسی هستند.
+
+## فوروارد مستقیم از ایران به خارج
+
+مسیر داده به این شکل است:
+
+~~~text
+کلاینت AnyTLS → IP و پورت سرور ایران → فوروارد TCP با GOST → IP و پورت سرور AnyTLS خارج
+~~~
+
+گزینهٔ **Set up direct Iran-to-abroad TCP forwarding with GOST** را انتخاب کنید. راهنما این موارد را می‌پرسد:
+
+- آدرس سرور AnyTLS خارج (IP یا نام دامنه).
+- پورت TCP سرور AnyTLS.
+- IP شنود روی سرور ایران.
+
+پورت ورودی ایران با همان شمارهٔ پورت AnyTLS خارج تنظیم می‌شود. در پروفایل کلاینت فقط آدرس سرور را با **IP عمومی سرور ایران** جایگزین کنید؛ پورت و رمز AnyTLS را همان قبلی نگه دارید.
+
+GOST جریان TCP را به آدرس و پورت سرور خارج منتقل می‌کند و به رمز AnyTLS نیاز ندارد. سرور AnyTLS باید از قبل روی سرور خارج فعال باشد و سرور ایران بتواند به آن دسترسی داشته باشد. پورت ورودی TCP را در فایروال سرور ایران و فایروال ارائه‌دهنده باز کنید و دسترسی خروجی سرور ایران به مقصد AnyTLS خارج را نیز مجاز کنید.
+
+راهنما آخرین نسخهٔ پایدار رسمی GOST برای Linux amd64 یا arm64 را دانلود و پیش از نصب SHA-256 آن را بررسی می‌کند. فوروارد به‌صورت سرویس systemd اجرا می‌شود، پس از راه‌اندازی مجدد سرور خودکار بالا می‌آید و در صورت خطا دوباره اجرا می‌شود. برای سازگاری با فرمان‌های پنل، نام سرویس anytls-tunnel باقی مانده است.
 
 ## امکانات پنل
 
-- نمایش وضعیت و اجرای start، stop، restart، enable هنگام بوت و disable سرویس AnyTLS.
-- مشاهدهٔ گزارش‌های سرویس.
+- نمایش وضعیت و اجرای start، stop، restart، enable هنگام بوت یا disable برای سرور AnyTLS و سرویس فوروارد.
+- مشاهده یا دنبال‌کردن گزارش سرویس‌ها.
 - تغییر IP شنود، پورت و رمز سرور AnyTLS.
-- راه‌اندازی یا تنظیم دوبارهٔ فوروارد SSH از ایران به خارج.
-- نمایش وضعیت و مدیریت سرویس تونل و مشاهدهٔ تنظیمات اتصالِ غیرمحرمانه.
+- راه‌اندازی یا تنظیم دوبارهٔ فوروارد مستقیم TCP با GOST.
+- نمایش آدرس و پورت فوروارد؛ رمز AnyTLS در این تنظیمات ذخیره نمی‌شود.
 - نمایش دستورهای معادل systemd.
-
-منو و پرسش‌های TUI به زبان انگلیسی هستند.
-
-## فوروارد از ایران به خارج
-
-جهت تونل به این صورت است:
-
-~~~text
-کاربر AnyTLS → IP و پورت سرور ایران → اتصال SSH → میزبان و پورت AnyTLS از دید سرور خارج
-~~~
-
-در منوی نصب، **Iran-to-abroad SSH tunnel** را انتخاب کنید. راهنما این موارد را می‌پرسد:
-
-- میزبان SSH سرور خارج، پورت SSH و نام حساب کاربری.
-- IP شنود و پورت ورودی کاربران روی سرور ایران.
-- میزبان و پورت AnyTLS از دید سرور خارج. اگر AnyTLS روی همان سرور خارج اجرا می‌شود، مقدار میزبان را 127.0.0.1 بگذارید.
-- مجوز کلید SSH و تأیید کلید میزبان SSH.
-
-راهنما یک کلید اختصاصی Ed25519 می‌سازد و کلید عمومی را نمایش می‌دهد. آن را به فایل authorized_keys حساب انتخاب‌شده روی سرور خارج اضافه کنید. سرویس SSH سرور خارج باید فوروارد TCP محلی به مقصد AnyTLS تنظیم‌شده را مجاز بداند؛ از AllowTcpForwarding local استفاده کنید و در صورت نیاز PermitOpen را به همان میزبان و پورت محدود کنید. این راهنما تنظیمات سرور خارج را تغییر نمی‌دهد.
-
-تونل به‌صورت سرویس systemd با نام anytls-tunnel اجرا می‌شود، هنگام بوت فعال است و پس از قطع اتصال دوباره تلاش می‌کند. پیش از اعتماد به کلید میزبان SSH سرور خارج، اثرانگشتی را که راهنما نشان می‌دهد از طریق کنسول سرور خارج یا یک مسیر مطمئن دیگر جداگانه بررسی کنید.
-
-کاربران باید به **IP عمومی سرور ایران** و پورت ورودی انتخاب‌شده وصل شوند و از رمز AnyTLS تعریف‌شده روی سرور خارج استفاده کنند. پورت TCP ورودی را هم در فایروال خود سرور ایران و هم در فایروال پنل ارائه‌دهنده باز کنید. پورت SSH سرور خارج نیز باید از ایران قابل‌دسترسی باشد.
 
 ## دستورهای سرویس
 
-همین عملیات از داخل TUI هم در دسترس است. دستورهای مستقیم:
+این عملیات از داخل TUI هم در دسترس هستند:
 
 ~~~bash
 sudo systemctl status anytls
@@ -184,18 +173,13 @@ sudo systemctl disable anytls-tunnel
 sudo journalctl -u anytls-tunnel -f
 ~~~
 
-دستورهای تونل پس از پیکربندی فوروارد SSH قابل استفاده هستند. disable اجرای خودکار هنگام بوت را متوقف می‌کند، اما سرویسی را که اکنون فعال است متوقف نمی‌کند.
+disable اجرای خودکار هنگام بوت را متوقف می‌کند، اما سرویسی را که اکنون فعال است متوقف نمی‌کند.
 
-## پیش‌نیازها
+## پیش‌نیازها و نکته‌ها
 
 - لینوکس دارای systemd و دسترسی root یا sudo.
-- نصب‌کننده به curl، python3، base64 و ابزارهای استاندارد مدیریت حساب نیاز دارد.
-- برای تونل SSH، دستورهای ssh، ssh-keygen و ssh-keyscan باید نصب باشند. اگر پنل اعلام کرد دستوری موجود نیست، بستهٔ OpenSSH client توزیع خود را نصب و راهنما را دوباره اجرا کنید.
-- فایل‌های رسمی AnyTLS-Go برای معماری‌های amd64 و arm64 انتخاب می‌شوند.
-
-## نکات امنیتی
-
-- تونل روی IP انتخابی شما شنود می‌کند. فقط زمانی 0.0.0.0 را انتخاب کنید که کاربران باید از طریق رابط‌های شبکهٔ سرور وصل شوند و دسترسی را با فایروال سرور و ارائه‌دهنده محدود کنید.
-- تونل از یک کلید خصوصی اختصاصی استفاده می‌کند که با مجوز محدود در /etc/anytls-tunnel ذخیره می‌شود. رمز AnyTLS داخل تنظیمات تونل کپی نمی‌شود.
-- اثرانگشت کلید میزبان SSH سرور خارج را پیش از تأیید، جداگانه بررسی کنید.
+- curl، Python 3 و ابزارهای استاندارد مدیریت حساب.
+- فوروارد GOST از Linux amd64 و arm64 پشتیبانی می‌کند.
+- فوروارد روی IP انتخاب‌شده در راهنما شنود می‌کند. برای پذیرش اتصال روی همهٔ رابط‌های IPv4 مقدار **0.0.0.0** را انتخاب کنید و دسترسی را با فایروال محدود کنید.
+- پورت ورودی باید روی سرور ایران آزاد باشد.
 - AnyTLS-Go خود را پیاده‌سازی مرجع معرفی می‌کند و هشدار می‌دهد تنظیم نمونه با فرض نبود حملهٔ MITM است. پیش از استفاده برای ترافیک حساس، [مستندات پروژهٔ اصلی](https://github.com/anytls/anytls-go) را بخوانید.

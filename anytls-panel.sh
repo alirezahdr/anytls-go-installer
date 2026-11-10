@@ -9,10 +9,10 @@ readonly TUNNEL_UNIT='anytls-tunnel'
 readonly TUNNEL_USER='anytls-tunnel'
 readonly TUNNEL_DIR='/etc/anytls-tunnel'
 readonly TUNNEL_CONFIG='/etc/anytls-tunnel/forward.env'
-readonly TUNNEL_KEY='/etc/anytls-tunnel/id_ed25519'
-readonly TUNNEL_KNOWN_HOSTS='/etc/anytls-tunnel/known_hosts'
 readonly TUNNEL_WRAPPER='/usr/local/libexec/anytls-tunnel-start'
 readonly TUNNEL_SERVICE_FILE='/etc/systemd/system/anytls-tunnel.service'
+readonly GOST_API='https://api.github.com/repos/go-gost/gost/releases/latest'
+readonly GOST_BIN='/usr/local/bin/anytls-gost'
 
 RED=$'\033[31m'
 GREEN=$'\033[32m'
@@ -83,10 +83,6 @@ except ValueError:
 PY
 }
 
-valid_user() {
-  [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9._-]{0,31}$ ]]
-}
-
 read_valid() {
   local prompt="$1" default="$2" validator="$3" target="$4" value
   while true; do
@@ -137,6 +133,14 @@ unit_state() {
   fi
   state="$(systemctl is-active "$1" 2>/dev/null || true)"
   printf '%s' "${state:-inactive}"
+}
+
+forward_state() {
+  if [[ -r "$TUNNEL_CONFIG" ]] && grep -q '^SSH_HOST=' "$TUNNEL_CONFIG"; then
+    printf 'legacy SSH setup; reconfigure'
+  else
+    unit_state "$TUNNEL_UNIT"
+  fi
 }
 
 unit_menu() {
@@ -255,123 +259,158 @@ ensure_tunnel_user() {
     if [[ -z "$nologin" ]]; then nologin='/bin/false'; fi
     useradd --system --user-group --no-create-home --home-dir /nonexistent --shell "$nologin" "$TUNNEL_USER"
   fi
-  [[ "$(id -u "$TUNNEL_USER")" != '0' ]] || { fail 'The tunnel account has UID 0.'; return 1; }
+  [[ "$(id -u "$TUNNEL_USER")" != '0' ]] || { fail 'The forwarding account has UID 0.'; return 1; }
   TUNNEL_GROUP="$(id -gn "$TUNNEL_USER")"
   install -d -o "$TUNNEL_USER" -g "$TUNNEL_GROUP" -m 0700 "$TUNNEL_DIR"
 }
 
-host_for_forward() {
-  if [[ "$1" == *:* ]]; then
-    printf '[%s]' "$1"
-  else
-    printf '%s' "$1"
+install_latest_gost() {
+  local machine_arch arch release_file archive stage
+  local -a release_info
+  command -v curl >/dev/null 2>&1 || { fail 'curl is required to download GOST.'; return 1; }
+  command -v python3 >/dev/null 2>&1 || { fail 'python3 is required to validate the GOST release.'; return 1; }
+
+  machine_arch="$(uname -m)"
+  case "$machine_arch" in
+    x86_64|amd64) arch='amd64' ;;
+    aarch64|arm64) arch='arm64' ;;
+    *) fail "GOST release architecture is not supported: $machine_arch (supported: amd64 and arm64)."; return 1 ;;
+  esac
+
+  release_file="$TMP_DIR/gost-release.json"
+  if ! curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
+    --header 'Accept: application/vnd.github+json' \
+    --header 'X-GitHub-Api-Version: 2022-11-28' \
+    --user-agent 'anytls-go-installer' "$GOST_API" --output "$release_file"; then
+    fail 'Could not fetch the latest stable GOST release from GitHub.'
+    return 1
   fi
+
+  mapfile -t release_info < <(python3 - "$release_file" "$arch" <<'PY'
+import json
+import re
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    release = json.load(stream)
+tag = release.get("tag_name", "")
+if not tag or release.get("draft") or release.get("prerelease"):
+    raise SystemExit("GitHub did not return a stable GOST release.")
+version = tag[1:] if tag.startswith("v") else tag
+if not re.fullmatch(r"[0-9A-Za-z._-]+", version):
+    raise SystemExit("The GOST release version is invalid.")
+name = f"gost_{version}_linux_{sys.argv[2]}.tar.gz"
+matches = [asset for asset in release.get("assets", []) if asset.get("name") == name]
+if len(matches) != 1:
+    raise SystemExit(f"Official GOST release archive not found: {name}")
+asset = matches[0]
+url = asset.get("browser_download_url", "")
+if not url.startswith("https://github.com/go-gost/gost/releases/download/"):
+    raise SystemExit("The GOST download URL is unexpected.")
+digest = asset.get("digest", "")
+if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest):
+    raise SystemExit("GitHub did not provide a valid SHA-256 digest for the GOST archive.")
+print(tag)
+print(url)
+print(digest.split(":", 1)[1])
+PY
+)
+  if (( ${#release_info[@]} != 3 )); then
+    fail 'Could not validate GOST release metadata or its SHA-256 digest.'
+    return 1
+  fi
+
+  printf 'Downloading official GOST %s for Linux/%s...\n' "${release_info[0]}" "$arch"
+  archive="$TMP_DIR/gost.tar.gz"
+  if ! curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 300 \
+    --user-agent 'anytls-go-installer' "${release_info[1]}" --output "$archive"; then
+    fail 'Could not download the GOST release archive.'
+    return 1
+  fi
+  stage="$TMP_DIR/anytls-gost"
+  if ! python3 - "$archive" "${release_info[2]}" "$stage" <<'PY'
+import hashlib
+import os
+import sys
+import tarfile
+
+archive_path, expected_digest, output_path = sys.argv[1:]
+digest = hashlib.sha256()
+with open(archive_path, "rb") as stream:
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        digest.update(chunk)
+if digest.hexdigest().lower() != expected_digest.lower():
+    raise SystemExit("The GOST archive SHA-256 does not match GitHub's release digest.")
+try:
+    with tarfile.open(archive_path, "r:gz") as package:
+        candidates = [member for member in package.getmembers()
+                      if member.name.rsplit("/", 1)[-1] == "gost" and member.isfile()]
+        if len(candidates) != 1:
+            raise SystemExit("The archive did not contain exactly one regular gost executable.")
+        source = package.extractfile(candidates[0])
+        if source is None:
+            raise SystemExit("Could not read the GOST executable from the archive.")
+        with source, open(output_path, "wb") as target:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                target.write(chunk)
+except (OSError, tarfile.TarError) as error:
+    raise SystemExit(f"The GOST archive is invalid: {error}")
+if os.path.getsize(output_path) == 0:
+    raise SystemExit("The downloaded GOST executable is empty.")
+os.chmod(output_path, 0o755)
+PY
+  then
+    fail 'GOST archive validation failed; installation stopped.'
+    return 1
+  fi
+  install -o root -g root -m 0755 "$stage" "$GOST_BIN.new"
+  mv -f -- "$GOST_BIN.new" "$GOST_BIN"
 }
 
-setup_tunnel() {
-  local command_name ssh_bin ssh_host ssh_port ssh_user local_bind local_port dest_host dest_port
-  local key_tmp pub_tmp scan_tmp fingerprint confirmation forward_bind forward_dest
+setup_forward() {
+  local dest_host dest_port local_bind confirmation local_display dest_display
   local env_tmp service_tmp wrapper_tmp work_dir
-
-  for command_name in ssh ssh-keygen ssh-keyscan; do
-    if ! command -v "$command_name" >/dev/null 2>&1; then
-      fail "Required OpenSSH client command not found: $command_name. Install the OpenSSH client package and try again."
-      pause
-      return 1
-    fi
-  done
   if ! command -v python3 >/dev/null 2>&1; then
     fail 'python3 is required for input validation.'
     pause
     return 1
   fi
-  ssh_bin="$(command -v ssh)"
-  [[ "$ssh_bin" =~ ^/[A-Za-z0-9._/-]+$ ]] || { fail 'The ssh executable path contains unsupported characters.'; pause; return 1; }
 
   header
-  printf '%sIran-to-abroad TCP forwarding setup%s\n\n' "$GREEN" "$RESET"
-  printf 'Clients connect to this server in Iran. This machine opens an SSH connection to the foreign server, then forwards TCP traffic to the AnyTLS host and port as seen from that foreign server.\n'
-  printf 'The AnyTLS server must already be running at the destination. This wizard does not change the foreign server.\n\n'
+  printf '%sDirect Iran-to-abroad TCP forwarding with GOST%s\n\n' "$GREEN" "$RESET"
+  printf 'This Iran server accepts the AnyTLS TCP connection and forwards it directly to the AnyTLS server abroad.\n'
+  printf 'The incoming and destination ports are kept identical, so clients only replace the server IP in their AnyTLS profile.\n\n'
+  read_valid 'Foreign AnyTLS server address (IP or DNS name)' '' valid_host DEST_HOST
+  read_valid 'AnyTLS TCP port (also used as the Iran entry port)' '443' valid_port DEST_PORT
+  read_valid 'Listen IP on this Iran server (0.0.0.0 accepts IPv4 connections on all interfaces)' '0.0.0.0' valid_ip LOCAL_BIND
 
-  read_valid 'Foreign server SSH host (IP or DNS name)' '' valid_host SSH_HOST
-  read_valid 'Foreign server SSH port' '22' valid_port SSH_PORT
-  read_valid 'SSH username on the foreign server' '' valid_user SSH_USER
-  read_valid 'Local listen IP on this Iran server (0.0.0.0 accepts clients on all IPv4 interfaces)' '0.0.0.0' valid_ip LOCAL_BIND
-  read_valid 'Local TCP port for clients on this Iran server' '443' valid_port LOCAL_PORT
-  read_valid 'AnyTLS destination host as seen from the foreign server' '127.0.0.1' valid_host DEST_HOST
-  read_valid 'AnyTLS destination TCP port' '443' valid_port DEST_PORT
+  if [[ "$LOCAL_BIND" == *:* ]]; then local_display="[$LOCAL_BIND]:$DEST_PORT"; else local_display="$LOCAL_BIND:$DEST_PORT"; fi
+  if [[ "$DEST_HOST" == *:* ]]; then dest_display="[$DEST_HOST]:$DEST_PORT"; else dest_display="$DEST_HOST:$DEST_PORT"; fi
 
   header
   printf 'Forwarding summary\n\n'
-  printf 'Iran server listener: %s:%s\n' "$LOCAL_BIND" "$LOCAL_PORT"
-  printf 'SSH connection:      %s@%s:%s\n' "$SSH_USER" "$SSH_HOST" "$SSH_PORT"
-  printf 'Foreign destination: %s:%s\n\n' "$DEST_HOST" "$DEST_PORT"
-  printf 'On the foreign SSH server, the account must allow local TCP forwarding to this exact destination. Install the public key from the next step into that account authorized_keys file.\n'
-  read -r -p 'Press Enter to create or reuse the dedicated SSH key... ' _
-
-  ensure_tunnel_user || { pause; return 1; }
-  work_dir="$(mktemp -d -p "$TMP_DIR" tunnel.XXXXXXXX)"
-  chmod 0700 "$work_dir"
-  key_tmp="$work_dir/id_ed25519"
-  pub_tmp="$work_dir/id_ed25519.pub"
-
-  if [[ -f "$TUNNEL_KEY" ]]; then
-    if ! ssh-keygen -y -P '' -f "$TUNNEL_KEY" > "$pub_tmp"; then
-      fail 'The existing tunnel key is invalid or encrypted. Move it aside and run setup again.'
-      pause
-      return 1
-    fi
-  else
-    if ! ssh-keygen -q -t ed25519 -N '' -C "anytls-tunnel@$(hostname)" -f "$key_tmp"; then
-      fail 'Could not create an SSH key.'
-      pause
-      return 1
-    fi
-    install -o "$TUNNEL_USER" -g "$TUNNEL_GROUP" -m 0600 "$key_tmp" "$TUNNEL_KEY"
-    install -o "$TUNNEL_USER" -g "$TUNNEL_GROUP" -m 0644 "$pub_tmp" "$TUNNEL_KEY.pub"
-  fi
-  chown "$TUNNEL_USER:$TUNNEL_GROUP" "$TUNNEL_KEY"
-  chmod 0600 "$TUNNEL_KEY"
-  install -o "$TUNNEL_USER" -g "$TUNNEL_GROUP" -m 0644 "$pub_tmp" "$TUNNEL_KEY.pub"
-
-  scan_tmp="$work_dir/known_hosts"
-  if ! ssh-keyscan -T 10 -p "$SSH_PORT" "$SSH_HOST" > "$scan_tmp" 2>/dev/null || [[ ! -s "$scan_tmp" ]]; then
-    fail 'Could not retrieve the foreign server SSH host key. Check its address, port, and firewall.'
-    pause
-    return 1
-  fi
-  fingerprint="$(ssh-keygen -lf "$scan_tmp" 2>/dev/null || true)"
-  if [[ -z "$fingerprint" ]]; then
-    fail 'Could not calculate a fingerprint for the SSH host key. Tunnel setup stopped.'
-    pause
-    return 1
-  fi
-  header
-  printf 'Verify the SSH host key fingerprint using the foreign server console or another trusted channel:\n\n%s\n\n' "$fingerprint"
-  printf 'Only accept this key after verifying its fingerprint independently.\n'
-  read -r -p 'Type yes to trust this host key: ' confirmation
+  printf 'Iran listener:            %s\n' "$local_display"
+  printf 'Foreign AnyTLS target:    %s\n' "$dest_display"
+  printf 'Client profile:           replace only the server IP with the Iran server public IP\n'
+  printf 'AnyTLS port and password: unchanged\n\n'
+  printf 'Confirm the destination address and port are reachable from this Iran server. Allow inbound TCP on this port in both the server firewall and the hosting provider firewall.\n'
+  read -r -p 'Type yes to install GOST and enable the forwarding service: ' confirmation
   if [[ "$confirmation" != 'yes' ]]; then
-    printf 'Cancelled. The host key was not saved and the tunnel was not configured.\n'
+    printf 'Cancelled. No forwarding service was changed.\n'
     pause
     return 1
   fi
 
-  header
-  printf 'Dedicated public key\n\n'
-  cat "$TUNNEL_KEY.pub"
-  printf '\nAdd this line to the authorized_keys file for %s on the verified foreign server.\n' "$SSH_USER"
-  printf 'The remote sshd must permit local TCP forwarding to %s:%s.\n\n' "$DEST_HOST" "$DEST_PORT"
-  read -r -p 'Press Enter after adding the key on the foreign server... ' _
-
-  install -o "$TUNNEL_USER" -g "$TUNNEL_GROUP" -m 0644 "$scan_tmp" "$TUNNEL_KNOWN_HOSTS"
-  forward_bind="$(host_for_forward "$LOCAL_BIND")"
-  forward_dest="$(host_for_forward "$DEST_HOST")"
+  install_latest_gost || { pause; return 1; }
+  ensure_tunnel_user || { pause; return 1; }
+  work_dir="$(mktemp -d -p "$TMP_DIR" forward.XXXXXXXX)"
+  chmod 0700 "$work_dir"
   env_tmp="$work_dir/forward.env"
-  printf 'SSH_BIN=%s\nSSH_HOST=%s\nSSH_PORT=%s\nSSH_USER=%s\nSSH_KEY=%s\nKNOWN_HOSTS=%s\nLOCAL_BIND=%s\nLOCAL_PORT=%s\nDEST_HOST=%s\nDEST_PORT=%s\n' \
-    "$ssh_bin" "$SSH_HOST" "$SSH_PORT" "$SSH_USER" "$TUNNEL_KEY" "$TUNNEL_KNOWN_HOSTS" "$LOCAL_BIND" "$LOCAL_PORT" "$DEST_HOST" "$DEST_PORT" > "$env_tmp"
+  printf 'LOCAL_BIND=%s\nLOCAL_PORT=%s\nDEST_HOST=%s\nDEST_PORT=%s\n' \
+    "$LOCAL_BIND" "$DEST_PORT" "$DEST_HOST" "$DEST_PORT" > "$env_tmp"
   install -o root -g root -m 0600 "$env_tmp" "$TUNNEL_CONFIG.new"
 
-  wrapper_tmp="$work_dir/anytls-tunnel-start"
+  wrapper_tmp="$work_dir/anytls-forward-start"
   cat > "$wrapper_tmp" <<'WRAPPER'
 #!/bin/sh
 set -eu
@@ -379,32 +418,14 @@ bind_host="$LOCAL_BIND"
 destination_host="$DEST_HOST"
 case "$bind_host" in *:*) bind_host="[$bind_host]" ;; esac
 case "$destination_host" in *:*) destination_host="[$destination_host]" ;; esac
-forward="$bind_host:$LOCAL_PORT:$destination_host:$DEST_PORT"
-exec "$SSH_BIN" -F /dev/null -N -T \
-  -L "$forward" \
-  -p "$SSH_PORT" \
-  -i "$SSH_KEY" \
-  -o IdentitiesOnly=yes \
-  -o PreferredAuthentications=publickey \
-  -o PasswordAuthentication=no \
-  -o KbdInteractiveAuthentication=no \
-  -o BatchMode=yes \
-  -o StrictHostKeyChecking=yes \
-  -o UserKnownHostsFile="$KNOWN_HOSTS" \
-  -o GlobalKnownHostsFile=/dev/null \
-  -o ExitOnForwardFailure=yes \
-  -o ServerAliveInterval=30 \
-  -o ServerAliveCountMax=3 \
-  -o ConnectTimeout=15 \
-  -o LogLevel=ERROR \
-  -l "$SSH_USER" "$SSH_HOST"
+exec /usr/local/bin/anytls-gost -L "tcp://${bind_host}:${LOCAL_PORT}/${destination_host}:${DEST_PORT}"
 WRAPPER
   chmod 0755 "$wrapper_tmp"
 
   service_tmp="$work_dir/anytls-tunnel.service"
   cat > "$service_tmp" <<'UNIT'
 [Unit]
-Description=Iran to foreign AnyTLS TCP forwarding tunnel
+Description=Direct AnyTLS TCP forwarding to the foreign server (GOST)
 Wants=network-online.target
 After=network-online.target
 StartLimitIntervalSec=0
@@ -435,7 +456,11 @@ WantedBy=multi-user.target
 UNIT
 
   if systemctl is-active --quiet "$TUNNEL_UNIT"; then
-    systemctl stop "$TUNNEL_UNIT"
+    if ! systemctl stop "$TUNNEL_UNIT"; then
+      fail 'Could not stop the existing forwarding service; its files were left unchanged.'
+      pause
+      return 1
+    fi
   fi
   mv -f -- "$TUNNEL_CONFIG.new" "$TUNNEL_CONFIG"
   install -d -o root -g root -m 0755 /usr/local/libexec
@@ -446,7 +471,7 @@ UNIT
 
   systemctl daemon-reload
   if ! systemctl enable --now "$TUNNEL_UNIT"; then
-    fail 'Tunnel setup was saved, but the service could not start. Review its logs.'
+    fail 'The forwarding service was saved, but could not start. Check whether the selected port is already in use and review the service logs.'
     systemctl status "$TUNNEL_UNIT" --no-pager || true
     journalctl -u "$TUNNEL_UNIT" -n 40 --no-pager || true
     pause
@@ -454,11 +479,11 @@ UNIT
   fi
 
   header
-  printf '%sTunnel service is active.%s\n\n' "$GREEN" "$RESET"
-  printf 'Clients should connect to the Iran server public IP on TCP port %s.\n' "$LOCAL_PORT"
-  printf 'Allow that TCP port in the Iran server firewall and hosting provider firewall.\n'
-  printf 'Service commands are available in this panel under SSH tunnel management.\n'
-  printf 'The remote AnyTLS server must be running and its SSH account must permit this forwarding.\n'
+  printf '%sDirect TCP forwarding is active.%s\n\n' "$GREEN" "$RESET"
+  printf 'Client server address: Iran server public IP\nClient port:           %s\n' "$DEST_PORT"
+  printf 'Client password:       the same AnyTLS password configured abroad\n\n'
+  printf 'Allow inbound TCP port %s in the Iran server firewall and hosting provider firewall.\n' "$DEST_PORT"
+  printf 'Manage the service from this panel or with: sudo systemctl status %s\n' "$TUNNEL_UNIT"
   pause
 }
 
@@ -466,26 +491,29 @@ tunnel_menu() {
   local choice
   while true; do
     header
-    printf 'Iran to foreign SSH tunnel\n\n'
-    printf 'Service status: %s\n' "$(unit_state "$TUNNEL_UNIT")"
-    printf '\n1) Set up or update the tunnel\n2) Manage tunnel service\n3) Show tunnel configuration\n0) Back\n'
+    printf 'Direct Iran-to-abroad TCP forwarding (GOST)\n\n'
+    printf 'Service status: %s\n' "$(forward_state)"
+    if [[ -r "$TUNNEL_CONFIG" ]] && grep -q '^SSH_HOST=' "$TUNNEL_CONFIG"; then
+      printf '\n%sA previous SSH setup was found. Choose option 1 to replace it with direct GOST forwarding.%s\n' "$YELLOW" "$RESET"
+    fi
+    printf '\n1) Set up or update direct forwarding\n2) Manage forwarding service\n3) Show forwarding configuration\n0) Back\n'
     read -r -p 'Select an option: ' choice
     case "$choice" in
-      1) setup_tunnel || true ;;
+      1) setup_forward || true ;;
       2)
         if unit_installed "$TUNNEL_UNIT"; then
-          unit_menu "$TUNNEL_UNIT" 'Iran to foreign SSH tunnel'
+          unit_menu "$TUNNEL_UNIT" 'Forwarding service'
         else
-          printf '%sTunnel is not configured yet.%s\n' "$YELLOW" "$RESET"
+          printf '%sForwarding is not configured yet.%s\n' "$YELLOW" "$RESET"
           pause
         fi
         ;;
       3)
         if [[ -r "$TUNNEL_CONFIG" ]]; then
           printf '\n'
-          sed -E 's/^(SSH_KEY|KNOWN_HOSTS)=.*/\1=[protected]/' "$TUNNEL_CONFIG"
+          cat "$TUNNEL_CONFIG"
         else
-          printf '%sNo tunnel configuration found.%s\n' "$YELLOW" "$RESET"
+          printf '%sNo forwarding configuration found.%s\n' "$YELLOW" "$RESET"
         fi
         pause
         ;;
@@ -499,7 +527,7 @@ command_reference() {
   header
   printf 'AnyTLS server commands:\n'
   printf '  systemctl status anytls\n  systemctl start anytls\n  systemctl stop anytls\n  systemctl restart anytls\n  systemctl enable anytls\n  systemctl disable anytls\n  journalctl -u anytls -f\n\n'
-  printf 'Iran-to-abroad tunnel commands:\n'
+  printf 'Direct GOST TCP forwarding commands:\n'
   printf '  systemctl status anytls-tunnel\n  systemctl start anytls-tunnel\n  systemctl stop anytls-tunnel\n  systemctl restart anytls-tunnel\n  systemctl enable anytls-tunnel\n  systemctl disable anytls-tunnel\n  journalctl -u anytls-tunnel -f\n\n'
   printf 'Installer/update command:\n'
   printf '  installer=$(curl -fsSL https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/install-anytls.sh) && sudo bash -c "$installer"\n'
@@ -511,8 +539,8 @@ main_menu() {
   while true; do
     header
     printf 'AnyTLS server: %s\n' "$(unit_state "$ANYTLS_UNIT")"
-    printf 'SSH tunnel:    %s\n\n' "$(unit_state "$TUNNEL_UNIT")"
-    printf '1) AnyTLS server management\n2) Iran-to-abroad SSH tunnel management\n3) Show command reference\n0) Exit\n'
+    printf 'GOST forward:  %s\n\n' "$(forward_state)"
+    printf '1) AnyTLS server management\n2) Direct Iran-to-abroad TCP forwarding management (GOST)\n3) Show command reference\n0) Exit\n'
     read -r -p 'Select an option: ' choice
     case "$choice" in
       1) anytls_menu ;;
@@ -532,8 +560,8 @@ fi
 TMP_DIR="$(mktemp -d -t anytls-panel.XXXXXXXX)"
 chmod 0700 "$TMP_DIR"
 
-if [[ "$#" -gt 0 && "$1" == '--setup-tunnel' ]]; then
+if [[ "$#" -gt 0 && "$1" == '--setup-forward' ]]; then
   shift
-  setup_tunnel || true
+  setup_forward || true
 fi
 main_menu

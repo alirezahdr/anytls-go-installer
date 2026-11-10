@@ -43,14 +43,14 @@ install -o root -g root -m 0755 "$TMP_DIR/anytls-panel" "$PANEL_FILE"
 
 printf '\nChoose what to configure on this server:\n'
 printf '1) Install or reconfigure the AnyTLS-Go server\n'
-printf '2) Set up an Iran-to-abroad SSH forwarding tunnel only\n'
+printf '2) Set up direct Iran-to-abroad TCP forwarding with GOST\n'
 printf '3) Open the service control panel\n'
 printf '0) Exit\n'
 while true; do
   read -r -p 'Select an option: ' install_mode
   case "$install_mode" in
     1) break ;;
-    2) "$PANEL_FILE" --setup-tunnel; exit ;;
+    2) "$PANEL_FILE" --setup-forward; exit ;;
     3) "$PANEL_FILE"; exit ;;
     0) exit 0 ;;
     *) printf 'Invalid option. Enter 1, 2, 3, or 0.\n' >&2 ;;
