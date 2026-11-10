@@ -5,7 +5,9 @@ export LC_ALL=C
 
 readonly REPO_API='https://api.github.com/repos/anytls/anytls-go/releases/latest'
 readonly PANEL_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/anytls-panel.sh'
+readonly USERS_HELPER_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/anytls-users.py'
 readonly PANEL_FILE='/usr/local/bin/anytls-panel'
+readonly USERS_HELPER_FILE='/usr/local/bin/anytls-users.py'
 readonly SERVICE_NAME='anytls'
 readonly SERVICE_FILE='/etc/systemd/system/anytls.service'
 readonly CONFIG_DIR='/etc/anytls'
@@ -40,9 +42,12 @@ printf 'Installing the terminal control panel...\n'
 curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
   "$PANEL_URL" --output "$TMP_DIR/anytls-panel"
 install -o root -g root -m 0755 "$TMP_DIR/anytls-panel" "$PANEL_FILE"
+curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
+  "$USERS_HELPER_URL" --output "$TMP_DIR/anytls-users.py"
+install -o root -g root -m 0755 "$TMP_DIR/anytls-users.py" "$USERS_HELPER_FILE"
 
 printf '\nChoose what to configure on this server:\n'
-printf '1) Install or reconfigure the AnyTLS-Go server\n'
+printf '1) Install or reconfigure the AnyTLS server\n'
 printf '2) Set up direct Iran-to-abroad TCP forwarding with GOST\n'
 printf '3) Open the service control panel\n'
 printf '0) Exit\n'
@@ -56,6 +61,12 @@ while true; do
     *) printf 'Invalid option. Enter 1, 2, 3, or 0.\n' >&2 ;;
   esac
 done
+
+if [[ -s /etc/anytls/users.json ]]; then
+  printf '\nMulti-user sing-box mode is already configured. Opening the control panel without replacing the server backend.\n'
+  "$PANEL_FILE"
+  exit 0
+fi
 
 if [[ -e "$SERVICE_FILE" || -e "$CONFIG_FILE" || -e "$BIN_FILE" ]]; then
   printf 'An existing AnyTLS installation was found. Continuing will replace its IP, port, and password settings.\n'

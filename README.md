@@ -18,7 +18,7 @@ installer=$(curl -fsSL https://raw.githubusercontent.com/alirezahdr/anytls-go-in
 
 The installer offers three choices:
 
-1. **Install or reconfigure AnyTLS-Go** — downloads the latest stable official release and asks for the server listen IP, port, and password.
+1. **Install or reconfigure the AnyTLS server** — installs the official AnyTLS-Go server with a single password, or opens the control panel without replacing an existing multi-user sing-box backend.
 2. **Set up direct forwarding with GOST** — configure an Iran-side entry point that forwards TCP to an AnyTLS server abroad. This does not install AnyTLS on the Iran server.
 3. **Open the control panel** — manage the services already configured on this machine.
 
@@ -50,11 +50,22 @@ GOST relays the TCP stream to the configured foreign address and port; it does n
 
 The wizard downloads the latest stable GOST release for Linux amd64 or arm64 from the official project and checks its SHA-256 digest before installing it. Forwarding runs as a systemd service, starts at boot, and restarts automatically after a failure. The service unit keeps the name anytls-tunnel for compatibility with the existing panel commands.
 
+## Multiple accounts and sing-box client profiles
+
+The upstream AnyTLS-Go server accepts one shared password. To manage multiple passwords on the same AnyTLS port, open **AnyTLS server → Manage accounts and client configs** in the TUI. The panel asks to migrate the server to the official sing-box AnyTLS backend and keeps the existing password as the first account. sing-box supports multiple named AnyTLS users on one inbound listener.
+
+The account menu can add and revoke accounts, set an expiry in days, and export Android, iOS, and Windows sing-box JSON files. Expired accounts are removed automatically about once per minute. New passwords are shown once when created. The JSON and QR image are saved under /root/anytls-clients; protect them as credentials and copy them securely to each device.
+
+The QR image contains a de-facto AnyTLS share URI for apps that support URI import. Other sing-box apps can import the generated JSON file. The JSON pins the self-signed server certificate's public key, so it verifies that the client reaches this server. Re-export client files if the server certificate is replaced. QR URI import support and certificate handling vary by client; use the JSON profile when URI import does not connect.
+
+The stock AnyTLS-Go and sing-box servers do not enforce per-account device counts or data-volume quotas. The TUI identifies this limitation instead of presenting non-enforced settings as real limits. Expiration is enforced.
+
 ## Panel features
 
 - Show status and start, stop, restart, enable at boot, or disable at boot for the AnyTLS server and forwarding service.
 - Review or follow service logs.
-- Change the AnyTLS server listen IP, port, and password.
+- Change the AnyTLS server listen IP and port; manage passwords from the account menu after migration.
+- Manage multiple sing-box accounts, account expiry, and client exports after switching server backend.
 - Set up or update the direct GOST TCP forward.
 - View the non-secret forwarding address and port.
 - Display the equivalent systemd commands.
@@ -87,7 +98,9 @@ Disabling a service prevents it from starting at boot but does not stop a servic
 
 - Linux with systemd and root or sudo access.
 - curl, Python 3, and standard account utilities.
+- OpenSSL is required to migrate the server to multi-user mode and export pinned client profiles. qrencode is optional for QR images; JSON export works without it, and the TUI can offer to install it through a supported system package manager.
 - GOST forwarding supports Linux amd64 and arm64.
+- The account and migration tools support Linux amd64 and arm64.
 - The forwarder listens on the IP selected in the wizard. Use **0.0.0.0** to accept connections on all IPv4 interfaces; restrict access through firewalls as needed.
 - The listen port must be available on the Iran server.
 - AnyTLS-Go describes itself as a reference implementation and warns that its sample configuration assumes there is no man-in-the-middle attack. Read the [upstream project documentation](https://github.com/anytls/anytls-go) before using it for sensitive traffic.
@@ -110,7 +123,7 @@ installer=$(curl -fsSL https://raw.githubusercontent.com/alirezahdr/anytls-go-in
 
 نصب‌کننده سه گزینه دارد:
 
-1. **نصب یا تنظیم دوبارهٔ AnyTLS-Go** — آخرین نسخهٔ پایدار رسمی را می‌گیرد و IP شنود، پورت و رمز سرور را می‌پرسد.
+1. **نصب یا تنظیم دوبارهٔ سرور AnyTLS** — سرور رسمی AnyTLS-Go تک‌رمزی را نصب می‌کند؛ اگر سرور چندکاربرهٔ sing-box از قبل فعال باشد، پنل را بدون جایگزین‌کردن آن باز می‌کند.
 2. **راه‌اندازی فوروارد مستقیم با GOST** — سرور ایران را به ورودی اتصال تبدیل می‌کند و TCP را به AnyTLS روی سرور خارج می‌فرستد. در این حالت AnyTLS روی سرور ایران نصب نمی‌شود.
 3. **بازکردن پنل مدیریت** — سرویس‌های تنظیم‌شده را مدیریت می‌کند.
 
@@ -140,13 +153,24 @@ sudo anytls-panel
 
 GOST جریان TCP را به آدرس و پورت سرور خارج منتقل می‌کند و به رمز AnyTLS نیاز ندارد. سرور AnyTLS باید از قبل روی سرور خارج فعال باشد و سرور ایران بتواند به آن دسترسی داشته باشد. پورت ورودی TCP را در فایروال سرور ایران و فایروال ارائه‌دهنده باز کنید و دسترسی خروجی سرور ایران به مقصد AnyTLS خارج را نیز مجاز کنید.
 
+## چندکاربره‌کردن و ساخت پروفایل sing-box
+
+سرور AnyTLS-Go اصلی فقط یک رمز مشترک می‌پذیرد. برای چند رمز روی یک پورت، در TUI مسیر **AnyTLS server → Manage accounts and client configs** را باز کنید. پنل با تأیید شما سرور را به پیاده‌سازی رسمی AnyTLS در sing-box منتقل می‌کند و رمز فعلی را به‌عنوان حساب اول نگه می‌دارد. sing-box چند کاربر نام‌دار را روی یک ورودی و پورت پشتیبانی می‌کند.
+
+از منوی حساب‌ها می‌توانید کاربر اضافه یا حذف کنید، مدت اعتبار را برحسب روز تعیین کنید و فایل JSON sing-box برای Android، iOS و Windows بسازید. حساب منقضی‌شده تقریباً هر یک دقیقه به‌طور خودکار حذف می‌شود. رمز جدید فقط یک‌بار پس از ساخت نمایش داده می‌شود. فایل‌های JSON و تصویر QR در مسیر /root/anytls-clients ذخیره می‌شوند؛ آن‌ها را مثل اطلاعات ورود محرمانه نگه دارید و امن به دستگاه‌ها منتقل کنید.
+
+QR شامل URI متداول AnyTLS برای برنامه‌هایی است که واردکردن URI را پشتیبانی می‌کنند. در بقیهٔ برنامه‌های sing-box فایل JSON را وارد کنید. JSON اثرانگشت کلید عمومی گواهی خودامضای سرور را pin می‌کند تا کلاینت همان سرور را اعتبارسنجی کند. اگر گواهی سرور عوض شد، فایل‌های کلاینت را دوباره بسازید. پشتیبانی QR و اعتبارسنجی گواهی بین برنامه‌ها فرق دارد؛ اگر URI وصل نشد، پروفایل JSON را وارد کنید.
+
+سرورهای رسمی AnyTLS-Go و sing-box محدودیت تعداد دستگاه یا سقف حجم را برای هر حساب اعمال نمی‌کنند. پنل این محدودیت را شفاف نشان می‌دهد و گزینهٔ ظاهریِ بدون اثر ارائه نمی‌کند. انقضای حساب اعمال می‌شود.
+
 راهنما آخرین نسخهٔ پایدار رسمی GOST برای Linux amd64 یا arm64 را دانلود و پیش از نصب SHA-256 آن را بررسی می‌کند. فوروارد به‌صورت سرویس systemd اجرا می‌شود، پس از راه‌اندازی مجدد سرور خودکار بالا می‌آید و در صورت خطا دوباره اجرا می‌شود. برای سازگاری با فرمان‌های پنل، نام سرویس anytls-tunnel باقی مانده است.
 
 ## امکانات پنل
 
 - نمایش وضعیت و اجرای start، stop، restart، enable هنگام بوت یا disable برای سرور AnyTLS و سرویس فوروارد.
 - مشاهده یا دنبال‌کردن گزارش سرویس‌ها.
-- تغییر IP شنود، پورت و رمز سرور AnyTLS.
+- تغییر IP شنود و پورت سرور AnyTLS؛ پس از مهاجرت، رمزها از منوی حساب‌ها مدیریت می‌شوند.
+- مدیریت حساب‌های چندگانهٔ sing-box، تاریخ انقضا و خروجی کلاینت پس از تغییر backend سرور.
 - راه‌اندازی یا تنظیم دوبارهٔ فوروارد مستقیم TCP با GOST.
 - نمایش آدرس و پورت فوروارد؛ رمز AnyTLS در این تنظیمات ذخیره نمی‌شود.
 - نمایش دستورهای معادل systemd.
@@ -179,6 +203,7 @@ disable اجرای خودکار هنگام بوت را متوقف می‌کند�
 
 - لینوکس دارای systemd و دسترسی root یا sudo.
 - curl، Python 3 و ابزارهای استاندارد مدیریت حساب.
+- برای مهاجرت به حالت چندکاربره و ساخت پروفایل pin‌شده OpenSSL لازم است. qrencode برای تصویر QR اختیاری است؛ خروجی JSON بدون آن هم ساخته می‌شود و TUI می‌تواند نصبش را با package manager پشتیبانی‌شده پیشنهاد کند.
 - فوروارد GOST از Linux amd64 و arm64 پشتیبانی می‌کند.
 - فوروارد روی IP انتخاب‌شده در راهنما شنود می‌کند. برای پذیرش اتصال روی همهٔ رابط‌های IPv4 مقدار **0.0.0.0** را انتخاب کنید و دسترسی را با فایروال محدود کنید.
 - پورت ورودی باید روی سرور ایران آزاد باشد.
