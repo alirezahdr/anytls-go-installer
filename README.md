@@ -44,22 +44,18 @@ GOST relays the TCP stream to the configured foreign address and port; it does n
 
 The wizard downloads the latest stable GOST release for Linux amd64 or arm64 from the official project and checks its SHA-256 digest before installing it. Forwarding runs as a systemd service, starts at boot, and restarts automatically after a failure. The service unit keeps the name anytls-tunnel for compatibility with the existing panel commands.
 
-## Multiple accounts and sing-box client profiles
+## Single-password client profiles
 
-The upstream AnyTLS-Go server accepts one shared password. To manage multiple passwords on the same AnyTLS port, open **AnyTLS server → Manage accounts and client configs** in the TUI. The panel asks to migrate the server to the official sing-box AnyTLS backend and keeps the existing password as the first account. sing-box supports multiple named AnyTLS users on one inbound listener.
+This installer runs the upstream AnyTLS-Go server with one shared password. In **AnyTLS server management → Export client QR and JSON profiles**, choose the address clients should use: the Iran server IP when GOST forwarding is configured, or the foreign server IP for a direct connection. The panel creates Android, iOS, and Windows sing-box JSON profiles and a QR image under `/root/anytls-clients`; it also prints the selected JSON in the terminal for copying. Existing exported files are kept.
 
-The account menu can add and revoke accounts, set an expiry in days, and export Android, iOS, and Windows sing-box JSON files. Each JSON enables `tls.insecure`, offers ALPN `h2` and `http/1.1`, and uses a device-specific uTLS fingerprint (`android`, `ios`, or `chrome` for Windows). After export, choose a platform in the TUI to print its complete JSON in the terminal for copying; the files are also saved under /root/anytls-clients. Expired accounts are removed automatically about once per minute. New passwords are shown once when created. Treat the JSON and QR image as credentials and copy them securely to each device.
-
-The default SNI is `www.cloudflare.com`; replace it with your own server domain when available. This is only a default TLS name and does not route traffic through Cloudflare or guarantee that a connection will pass filtering. The QR URI includes SNI and `insecure=1`; the generated JSON additionally carries ALPN and the platform-specific uTLS fingerprint. `tls.insecure` accepts any server certificate, so it removes certificate verification and makes the connection vulnerable to interception. uTLS fingerprint imitation is also not a guarantee of avoiding detection. Use the JSON profiles for sing-box clients when you need all generated settings.
-
-The stock AnyTLS-Go and sing-box servers do not enforce per-account device counts or data-volume quotas. The TUI identifies this limitation instead of presenting non-enforced settings as real limits. Expiration is enforced.
+The JSON profiles enable `tls.insecure`, set ALPN to `h2` and `http/1.1`, and use a device-specific uTLS fingerprint (`android`, `ios`, or `chrome` for Windows). The QR contains an AnyTLS URI with the server address, shared password, SNI, and insecure setting; import the JSON when you need the ALPN and uTLS options. The default SNI is `www.cloudflare.com`; replace it with your own server domain when available. SNI does not route traffic through Cloudflare or guarantee that a connection will pass filtering. `tls.insecure` disables certificate verification and can expose the connection to interception. uTLS fingerprint imitation does not guarantee that traffic will avoid detection.
 
 ## Panel features
 
 - Show status and start, stop, restart, enable at boot, or disable at boot for the AnyTLS server and forwarding service.
 - Review or follow service logs.
-- Change the AnyTLS server listen IP and port; manage passwords from the account menu after migration.
-- Manage multiple sing-box accounts, account expiry, and client exports after switching server backend.
+- Change the AnyTLS server listen IP, port, and shared password.
+- Export one shared-password QR link and Android, iOS, and Windows sing-box JSON profiles.
 - Set up or update the direct GOST TCP forward.
 - View the non-secret forwarding address and port.
 - Display the equivalent systemd commands.
@@ -107,10 +103,10 @@ sudo systemctl restart anytls
 ## Requirements and notes
 
 - Linux with systemd and root or sudo access.
-- curl, Python 3, and standard account utilities.
-- The installer installs qrencode automatically when installing or opening the AnyTLS panel, so QR export is ready to use. Supported package managers are apt, dnf, yum, zypper, and apk. OpenSSL is required to migrate the server to multi-user mode and export pinned client profiles.
+- curl, Python 3, and standard system utilities.
+- The installer installs qrencode automatically when installing or opening the AnyTLS panel, so QR export is ready to use. Supported package managers are apt, dnf, yum, zypper, and apk.
 - GOST forwarding supports Linux amd64 and arm64.
-- The account and migration tools support Linux amd64 and arm64.
+- The server installer supports Linux amd64 and arm64.
 - The forwarder listens on the IP selected in the wizard. Use **0.0.0.0** to accept connections on all IPv4 interfaces; restrict access through firewalls as needed.
 - The listen port must be available on the Iran server.
 - AnyTLS-Go describes itself as a reference implementation and warns that its sample configuration assumes there is no man-in-the-middle attack. Read the [upstream project documentation](https://github.com/anytls/anytls-go) before using it for sensitive traffic.
@@ -157,15 +153,11 @@ sudo anytls-panel
 
 GOST جریان TCP را به آدرس و پورت سرور خارج منتقل می‌کند و به رمز AnyTLS نیاز ندارد. سرور AnyTLS باید از قبل روی سرور خارج فعال باشد و سرور ایران بتواند به آن دسترسی داشته باشد. پورت ورودی TCP را در فایروال سرور ایران و فایروال ارائه‌دهنده باز کنید و دسترسی خروجی سرور ایران به مقصد AnyTLS خارج را نیز مجاز کنید.
 
-## چندکاربره‌کردن و ساخت پروفایل sing-box
+## ساخت QR و فایل‌های کلاینت
 
-سرور AnyTLS-Go اصلی فقط یک رمز مشترک می‌پذیرد. برای چند رمز روی یک پورت، در TUI مسیر **AnyTLS server → Manage accounts and client configs** را باز کنید. پنل با تأیید شما سرور را به پیاده‌سازی رسمی AnyTLS در sing-box منتقل می‌کند و رمز فعلی را به‌عنوان حساب اول نگه می‌دارد. sing-box چند کاربر نام‌دار را روی یک ورودی و پورت پشتیبانی می‌کند.
+این نصب‌کننده سرور اصلی AnyTLS-Go را با یک رمز مشترک اجرا می‌کند. از مسیر **AnyTLS server management → Export client QR and JSON profiles**، آدرسی را وارد کنید که کلاینت باید استفاده کند: IP سرور ایران، اگر فوروارد GOST فعال است؛ یا IP سرور خارج برای اتصال مستقیم. پنل فایل‌های sing-box برای Android، iOS و Windows و تصویر QR را در مسیر `/root/anytls-clients` می‌سازد و امکان نمایش JSON در ترمینال برای کپی را می‌دهد. فایل‌های خروجی قبلی پاک نمی‌شوند.
 
-از منوی حساب‌ها می‌توانید کاربر اضافه یا حذف کنید، مدت اعتبار را برحسب روز تعیین کنید و فایل JSON sing-box برای Android، iOS و Windows بسازید. در هر JSON گزینهٔ `tls.insecure` فعال است، ALPN روی `h2` و `http/1.1` تنظیم می‌شود و uTLS بر اساس خروجی دستگاه (`android`، `ios` یا `chrome` برای Windows) انتخاب می‌شود. پس از خروجی گرفتن، در TUI سیستم‌عامل را انتخاب کنید تا متن کامل JSON در ترمینال نمایش داده شود و بتوانید آن را کپی کنید؛ فایل‌ها در مسیر /root/anytls-clients هم ذخیره می‌شوند. حساب منقضی‌شده تقریباً هر یک دقیقه به‌طور خودکار حذف می‌شود. رمز جدید فقط یک‌بار پس از ساخت نمایش داده می‌شود. JSON و تصویر QR را مثل اطلاعات ورود محرمانه نگه دارید و امن به دستگاه‌ها منتقل کنید.
-
-SNI پیش‌فرض `www.cloudflare.com` است؛ اگر دامنهٔ خودتان را برای سرور دارید، آن را جایگزین کنید. این فقط نام TLS است و اتصال را از مسیر Cloudflare عبور نمی‌دهد یا عبور از فیلترینگ را تضمین نمی‌کند. URI داخل QR شامل SNI و `insecure=1` است؛ JSON خروجی علاوه بر آن ALPN و uTLS مخصوص پلتفرم را دارد. `tls.insecure` هر گواهی سروری را می‌پذیرد، پس بررسی گواهی غیرفعال می‌شود و امکان رهگیری اتصال وجود دارد. uTLS هم تضمین نمی‌کند که ترافیک شناسایی نشود. برای واردکردن همهٔ تنظیمات، فایل JSON را در sing-box وارد کنید.
-
-سرورهای رسمی AnyTLS-Go و sing-box محدودیت تعداد دستگاه یا سقف حجم را برای هر حساب اعمال نمی‌کنند. پنل این محدودیت را شفاف نشان می‌دهد و گزینهٔ ظاهریِ بدون اثر ارائه نمی‌کند. انقضای حساب اعمال می‌شود.
+در JSON گزینهٔ `tls.insecure` فعال است، ALPN برابر `h2` و `http/1.1` است و uTLS fingerprint بر اساس دستگاه تنظیم می‌شود (`android`، `ios` یا `chrome` برای Windows). QR شامل لینک AnyTLS با آدرس سرور، رمز مشترک، SNI و گزینهٔ insecure است؛ برای استفاده از ALPN و uTLS، فایل JSON را وارد کنید. SNI پیش‌فرض `www.cloudflare.com` است؛ در صورت داشتن دامنهٔ خودتان آن را جایگزین کنید. SNI اتصال را از مسیر Cloudflare عبور نمی‌دهد و عبور از فیلترینگ را تضمین نمی‌کند. گزینهٔ `tls.insecure` بررسی گواهی را غیرفعال می‌کند و می‌تواند اتصال را در برابر رهگیری آسیب‌پذیر کند. تقلید uTLS نیز تضمینی برای شناسایی‌نشدن ترافیک نیست.
 
 راهنما آخرین نسخهٔ پایدار رسمی GOST برای Linux amd64 یا arm64 را دانلود و پیش از نصب SHA-256 آن را بررسی می‌کند. فوروارد به‌صورت سرویس systemd اجرا می‌شود، پس از راه‌اندازی مجدد سرور خودکار بالا می‌آید و در صورت خطا دوباره اجرا می‌شود. برای سازگاری با فرمان‌های پنل، نام سرویس anytls-tunnel باقی مانده است.
 
@@ -173,8 +165,8 @@ SNI پیش‌فرض `www.cloudflare.com` است؛ اگر دامنهٔ خودتا
 
 - نمایش وضعیت و اجرای start، stop، restart، enable هنگام بوت یا disable برای سرور AnyTLS و سرویس فوروارد.
 - مشاهده یا دنبال‌کردن گزارش سرویس‌ها.
-- تغییر IP شنود و پورت سرور AnyTLS؛ پس از مهاجرت، رمزها از منوی حساب‌ها مدیریت می‌شوند.
-- مدیریت حساب‌های چندگانهٔ sing-box، تاریخ انقضا و خروجی کلاینت پس از تغییر backend سرور.
+- تغییر IP شنود، پورت و رمز مشترک سرور AnyTLS-Go.
+- ساخت QR و فایل JSON کلاینت sing-box برای Android، iOS و Windows.
 - راه‌اندازی یا تنظیم دوبارهٔ فوروارد مستقیم TCP با GOST.
 - نمایش آدرس و پورت فوروارد؛ رمز AnyTLS در این تنظیمات ذخیره نمی‌شود.
 - نمایش دستورهای معادل systemd.

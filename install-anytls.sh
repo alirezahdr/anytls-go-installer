@@ -5,10 +5,10 @@ export LC_ALL=C
 
 readonly REPO_API='https://api.github.com/repos/anytls/anytls-go/releases/latest'
 readonly PANEL_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/anytls-panel.sh'
-readonly USERS_HELPER_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/anytls-users.py'
+readonly CLIENT_HELPER_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/anytls-client-config.py'
 readonly INSTALLER_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/install-anytls.sh'
 readonly PANEL_FILE='/usr/local/bin/anytls-panel'
-readonly USERS_HELPER_FILE='/usr/local/bin/anytls-users.py'
+readonly CLIENT_HELPER_FILE='/usr/local/bin/anytls-client-config.py'
 readonly INSTALLER_FILE='/usr/local/libexec/anytls-installer'
 readonly SERVICE_NAME='anytls'
 readonly SERVICE_FILE='/etc/systemd/system/anytls.service'
@@ -82,8 +82,8 @@ if (( OPEN_PANEL )); then
     "$PANEL_URL" --output "$TMP_DIR/anytls-panel"
   install -o root -g root -m 0755 "$TMP_DIR/anytls-panel" "$PANEL_FILE"
   curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
-    "$USERS_HELPER_URL" --output "$TMP_DIR/anytls-users.py"
-  install -o root -g root -m 0755 "$TMP_DIR/anytls-users.py" "$USERS_HELPER_FILE"
+    "$CLIENT_HELPER_URL" --output "$TMP_DIR/anytls-client-config.py"
+  install -o root -g root -m 0755 "$TMP_DIR/anytls-client-config.py" "$CLIENT_HELPER_FILE"
   curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
     "$INSTALLER_URL" --output "$TMP_DIR/anytls-installer"
   install -o root -g root -m 0755 "$TMP_DIR/anytls-installer" "$INSTALLER_FILE.new"
@@ -109,7 +109,16 @@ if (( dropin_changed )); then
   systemctl daemon-reload
 fi
 
-if (( ! INSTALL_ANYTLS )); then
+SINGBOX_BACKEND=0
+if [[ -r "$CONFIG_FILE" ]] && grep -q '^ANYTLS_BACKEND=sing-box$' "$CONFIG_FILE"; then
+  SINGBOX_BACKEND=1
+fi
+RESTORE_BACKUP_DIR=''
+if (( ! SINGBOX_BACKEND )) && [[ -e /usr/local/bin/anytls-users.py ]]; then
+  rm -f -- /usr/local/bin/anytls-users.py
+fi
+
+if (( ! INSTALL_ANYTLS && ! SINGBOX_BACKEND )); then
   if systemctl cat "$SERVICE_NAME" >/dev/null 2>&1; then
     ensure_qrencode || die 'Could not install qrencode. Install it with your Linux package manager, then reopen the panel.'
   fi
@@ -119,26 +128,105 @@ fi
 
 ensure_qrencode || die 'Could not install qrencode. AnyTLS installation stopped; install qrencode with your Linux package manager and retry.'
 
-if [[ -s /etc/anytls/users.json ]]; then
-  printf '\nMulti-user sing-box mode is already configured. The existing backend will be preserved.\n'
-  if (( OPEN_PANEL )); then "$PANEL_FILE"; fi
-  exit 0
-fi
+RESTORE_SINGBOX=0
+PASSWORD_B64=''
+if (( SINGBOX_BACKEND )); then
+  printf '\nThis installer will restore the original single-password AnyTLS-Go backend. It will use the first active account password and keep the existing sing-box files and client exports as backups.\n'
+  mapfile -t RESTORE_INFO < <(python3 - "$CONFIG_FILE" /etc/anytls/users.json <<'PY'
+import base64
+import ipaddress
+import json
+import sys
+import time
 
-if [[ -e "$SERVICE_FILE" || -e "$CONFIG_FILE" || -e "$BIN_FILE" ]]; then
-  printf 'An existing AnyTLS installation was found. Continuing will replace its IP, port, and password settings.\n'
-  read -r -p 'Type yes to continue and reconfigure: ' replace_existing
-  [[ "$replace_existing" == 'yes' ]] || die 'Operation cancelled.'
-fi
-
-if [[ -t 0 ]]; then
-  read -r -p 'Server listen IP [0.0.0.0 for all IPv4 interfaces]: ' SERVER_IP
+env_path, users_path = sys.argv[1:]
+env = {}
+with open(env_path, encoding="utf-8") as stream:
+    for line in stream:
+        if "=" in line:
+            key, value = line.rstrip("\n").split("=", 1)
+            env[key] = value
+listen = env.get("ANYTLS_LISTEN", "")
+if listen.startswith("["):
+    end = listen.find("]")
+    if end < 0 or listen[end + 1:end + 2] != ":":
+        raise SystemExit("The saved AnyTLS listen address is invalid.")
+    address, port_text = listen[1:end], listen[end + 2:]
+else:
+    address, separator, port_text = listen.rpartition(":")
+    if not separator:
+        raise SystemExit("The saved AnyTLS listen address is invalid.")
+address = str(ipaddress.ip_address(address))
+port = int(port_text)
+if not 1 <= port <= 65535:
+    raise SystemExit("The saved AnyTLS port is invalid.")
+with open(users_path, encoding="utf-8") as stream:
+    users = json.load(stream)
+if not isinstance(users, list):
+    raise SystemExit("The saved account database is invalid.")
+selected = None
+for user in users:
+    expiry = user.get("expires_at")
+    if expiry is None or expiry > int(time.time()):
+        password = user.get("password", "")
+        if isinstance(password, str) and len(password) >= 16:
+            selected = user
+            break
+print(address)
+print(port)
+print(base64.b64encode(selected["password"].encode()).decode() if selected else "")
+print(selected.get("name", "unnamed") if selected else "")
+PY
+)
+  (( ${#RESTORE_INFO[@]} == 4 )) || die 'Could not recover the listen address and an active password from the saved sing-box accounts.'
+  SERVER_IP="${RESTORE_INFO[0]}"
+  PORT="${RESTORE_INFO[1]}"
+  PASSWORD_B64="${RESTORE_INFO[2]}"
+  RESTORE_ACCOUNT="${RESTORE_INFO[3]}"
+  if [[ -n "$PASSWORD_B64" ]]; then
+    printf 'The shared AnyTLS-Go password will be taken from active account: %s\n' "$RESTORE_ACCOUNT"
+  else
+    printf 'No unexpired sing-box account was found. Choose a new shared AnyTLS-Go password.\n'
+    while true; do
+      read -r -s -p 'AnyTLS password (at least 16 characters): ' PASSWORD
+      printf '\n'
+      read -r -s -p 'Confirm password: ' PASSWORD_CONFIRM
+      printf '\n'
+      if (( ${#PASSWORD} < 16 )); then
+        printf 'The password must contain at least 16 characters.\n' >&2
+      elif [[ "$PASSWORD" != "$PASSWORD_CONFIRM" ]]; then
+        printf 'The passwords do not match.\n' >&2
+      else
+        PASSWORD_B64="$(printf '%s' "$PASSWORD" | base64 | tr -d '\n')"
+        unset PASSWORD PASSWORD_CONFIRM
+        RESTORE_ACCOUNT='new password'
+        break
+      fi
+      unset PASSWORD PASSWORD_CONFIRM
+    done
+  fi
+  if [[ -t 0 ]]; then
+    read -r -p 'Type yes to restore AnyTLS-Go now: ' restore_confirmation
+  else
+    die 'Restoring from sing-box requires an interactive terminal confirmation.'
+  fi
+  [[ "$restore_confirmation" == 'yes' ]] || { printf 'No server settings were changed.\n'; exit 0; }
+  RESTORE_SINGBOX=1
 else
-  die 'Run this script from an interactive terminal to enter the IP, port, and password.'
-fi
-SERVER_IP="${SERVER_IP:-0.0.0.0}"
+  if [[ -e "$SERVICE_FILE" || -e "$CONFIG_FILE" || -e "$BIN_FILE" ]]; then
+    printf 'An existing AnyTLS installation was found. Continuing will replace its IP, port, and password settings.\n'
+    read -r -p 'Type yes to continue and reconfigure: ' replace_existing
+    [[ "$replace_existing" == 'yes' ]] || die 'Operation cancelled.'
+  fi
 
-if ! SERVER_IP="$(python3 - "$SERVER_IP" <<'PY'
+  if [[ -t 0 ]]; then
+    read -r -p 'Server listen IP [0.0.0.0 for all IPv4 interfaces]: ' SERVER_IP
+  else
+    die 'Run this script from an interactive terminal to enter the IP, port, and password.'
+  fi
+  SERVER_IP="${SERVER_IP:-0.0.0.0}"
+
+  if ! SERVER_IP="$(python3 - "$SERVER_IP" <<'PY'
 import ipaddress
 import sys
 
@@ -174,6 +262,9 @@ while true; do
   fi
 done
 unset PASSWORD_CONFIRM
+PASSWORD_B64="$(printf '%s' "$PASSWORD" | base64 | tr -d '\n')"
+unset PASSWORD
+fi
 
 case "$(uname -m)" in
   x86_64|amd64) ARCH='amd64' ;;
@@ -271,6 +362,16 @@ if os.path.getsize(output_path) == 0:
 PY
 chmod 0755 "$SERVER_STAGE"
 
+if (( RESTORE_SINGBOX )); then
+  RESTORE_BACKUP_DIR="$(mktemp -d /root/anytls-singbox-backup.XXXXXXXX)"
+  chmod 0700 "$RESTORE_BACKUP_DIR"
+  [[ -d /etc/anytls ]] && cp -a /etc/anytls "$RESTORE_BACKUP_DIR/etc-anytls"
+  [[ -e "$WRAPPER_FILE" ]] && cp -a "$WRAPPER_FILE" "$RESTORE_BACKUP_DIR/anytls-server-start"
+  [[ -e "$BIN_FILE" ]] && cp -a "$BIN_FILE" "$RESTORE_BACKUP_DIR/anytls-server"
+  [[ -e "$SERVICE_FILE" ]] && cp -a "$SERVICE_FILE" "$RESTORE_BACKUP_DIR/anytls.service"
+  [[ -e /usr/local/bin/anytls-users.py ]] && cp -a /usr/local/bin/anytls-users.py "$RESTORE_BACKUP_DIR/anytls-users.py"
+fi
+
 if ! getent passwd anytls >/dev/null 2>&1; then
   NOLOGIN="$(command -v nologin || true)"
   if [[ -z "$NOLOGIN" ]]; then
@@ -287,9 +388,6 @@ if [[ "$SERVER_IP" == *:* ]]; then
 else
   LISTEN="$SERVER_IP:$PORT"
 fi
-PASSWORD_B64="$(printf '%s' "$PASSWORD" | base64 | tr -d '\n')"
-unset PASSWORD
-
 printf 'Installing files and creating the systemd service...\n'
 if systemctl is-active --quiet "$SERVICE_NAME"; then
   systemctl stop "$SERVICE_NAME"
@@ -351,16 +449,31 @@ install -o root -g root -m 0644 "$TMP_DIR/anytls.service" "$SERVICE_FILE.new"
 mv -f -- "$SERVICE_FILE.new" "$SERVICE_FILE"
 
 systemctl daemon-reload
-if ! systemctl enable --now "$SERVICE_NAME"; then
+if ! systemctl enable --now "$SERVICE_NAME" || ! systemctl is-active --quiet "$SERVICE_NAME"; then
   printf 'The service failed to start. Recent logs:\n' >&2
   systemctl status "$SERVICE_NAME" --no-pager >&2 || true
   journalctl -u "$SERVICE_NAME" -n 30 --no-pager >&2 || true
+  if (( RESTORE_SINGBOX )); then
+    systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+    [[ -e "$RESTORE_BACKUP_DIR/etc-anytls/anytls.env" ]] && cp -a "$RESTORE_BACKUP_DIR/etc-anytls/anytls.env" "$CONFIG_FILE"
+    [[ -e "$RESTORE_BACKUP_DIR/anytls-server-start" ]] && cp -a "$RESTORE_BACKUP_DIR/anytls-server-start" "$WRAPPER_FILE"
+    [[ -e "$RESTORE_BACKUP_DIR/anytls-server" ]] && cp -a "$RESTORE_BACKUP_DIR/anytls-server" "$BIN_FILE"
+    [[ -e "$RESTORE_BACKUP_DIR/anytls.service" ]] && cp -a "$RESTORE_BACKUP_DIR/anytls.service" "$SERVICE_FILE"
+    [[ -e "$RESTORE_BACKUP_DIR/anytls-users.py" ]] && cp -a "$RESTORE_BACKUP_DIR/anytls-users.py" /usr/local/bin/anytls-users.py
+    systemctl daemon-reload
+    systemctl enable --now "$SERVICE_NAME" >/dev/null 2>&1 || true
+    die "The AnyTLS-Go restore failed; the previous sing-box service files were restored. Backup: $RESTORE_BACKUP_DIR"
+  fi
   die 'The service was installed but could not be started. Review the logs above.'
 fi
-systemctl is-active --quiet "$SERVICE_NAME" || die 'The service did not become active after installation.'
 
 printf '\nAnyTLS-Go %s installation is complete.\n' "$VERSION"
 printf 'Listen address: %s\n' "$LISTEN"
+if (( RESTORE_SINGBOX )); then
+  rm -f -- /usr/local/bin/anytls-users.py
+  printf 'The password from account %s is now the shared AnyTLS-Go password. Existing sing-box data and client exports were retained.\n' "$RESTORE_ACCOUNT"
+  printf 'Backup: %s\n' "$RESTORE_BACKUP_DIR"
+fi
 printf 'Service status: '
 systemctl is-active "$SERVICE_NAME"
 if (( OPEN_PANEL )); then
