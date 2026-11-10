@@ -35,6 +35,8 @@ SERVICE = "anytls"
 CLIENT_DIR = Path("/root/anytls-clients")
 TIMER = Path("/etc/systemd/system/anytls-users-expiry.timer")
 TIMER_SERVICE = Path("/etc/systemd/system/anytls-users-expiry.service")
+DEFAULT_SNI = "www.cloudflare.com"
+PLATFORM_FINGERPRINTS = {"android": "android", "ios": "ios", "windows": "chrome"}
 
 
 def require_root():
@@ -454,17 +456,6 @@ def reconfigure(listen):
         raise
 
 
-def certificate_public_key_pin():
-    certificate = run(["openssl", "x509", "-in", str(CERT), "-pubkey", "-noout"], capture=True).stdout
-    public_key = subprocess.run(
-        ["openssl", "pkey", "-pubin", "-outform", "DER"],
-        input=certificate.encode("ascii"),
-        check=True,
-        capture_output=True,
-    ).stdout
-    return base64.b64encode(hashlib.sha256(public_key).digest()).decode("ascii")
-
-
 def validate_host(value):
     try:
         return str(ipaddress.ip_address(value))
@@ -484,39 +475,46 @@ def export_config(name, server, port, sni):
     port = int(port)
     if not 1 <= port <= 65535:
         raise ValueError("The client port is out of range.")
-    if sni:
-        sni = validate_host(sni)
-    tls = {"enabled": True, "certificate_public_key_sha256": [certificate_public_key_pin()]}
-    if sni:
-        tls["server_name"] = sni
-    config = {
-        "log": {"level": "info", "timestamp": True},
-        "dns": {
-            "servers": [{"type": "udp", "tag": "remote-dns", "server": "1.1.1.1"}],
-            "final": "remote-dns",
-        },
-        "inbounds": [
-            {"type": "tun", "tag": "tun-in", "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
-             "auto_route": True, "strict_route": True},
-            {"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080},
-        ],
-        "outbounds": [
-            {"type": "anytls", "tag": "anytls-out", "server": server, "server_port": port,
-             "password": user["password"], "tls": tls},
-            {"type": "direct", "tag": "direct"},
-        ],
-        "route": {"auto_detect_interface": True, "final": "anytls-out"},
+    sni = validate_host(sni or DEFAULT_SNI)
+    tls = {
+        "enabled": True,
+        "server_name": sni,
+        "insecure": True,
+        "alpn": ["h2", "http/1.1"],
     }
-    validate_config(config)
     CLIENT_DIR.mkdir(parents=True, exist_ok=True)
     os.chmod(CLIENT_DIR, 0o700)
     paths = []
-    for platform in ("android", "ios", "windows"):
+    for platform, fingerprint in PLATFORM_FINGERPRINTS.items():
+        config = {
+            "log": {"level": "info", "timestamp": True},
+            "dns": {
+                "servers": [{"type": "udp", "tag": "remote-dns", "server": "1.1.1.1"}],
+                "final": "remote-dns",
+            },
+            "inbounds": [
+                {"type": "tun", "tag": "tun-in", "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+                 "auto_route": True, "strict_route": True},
+                {"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080},
+            ],
+            "outbounds": [
+                {"type": "anytls", "tag": "anytls-out", "server": server, "server_port": port,
+                 "password": user["password"], "tls": {
+                     **tls,
+                     "utls": {"enabled": True, "fingerprint": fingerprint},
+                 }},
+                {"type": "direct", "tag": "direct"},
+            ],
+            "route": {"auto_detect_interface": True, "final": "anytls-out"},
+        }
+        validate_config(config)
         path = CLIENT_DIR / f"{name}-{platform}.json"
         atomic_write(path, json.dumps(config, indent=2, ensure_ascii=False) + "\n", 0o600)
         paths.append(str(path))
     host = f"[{server}]" if ":" in server else server
-    uri = f"anytls://{urllib.parse.quote(user['password'], safe='')}@{host}:{port}#{urllib.parse.quote(name, safe='')}"
+    query = urllib.parse.urlencode({"sni": sni, "insecure": "1"})
+    uri = (f"anytls://{urllib.parse.quote(user['password'], safe='')}@{host}:{port}/?{query}"
+           f"#{urllib.parse.quote(name, safe='')}")
     print(uri)
     print("\n".join(paths))
 
@@ -540,7 +538,7 @@ def main():
     export_parser.add_argument("--name", required=True)
     export_parser.add_argument("--server", required=True)
     export_parser.add_argument("--port", required=True)
-    export_parser.add_argument("--sni", default="")
+    export_parser.add_argument("--sni", default=DEFAULT_SNI)
     args = parser.parse_args()
     try:
         require_root()

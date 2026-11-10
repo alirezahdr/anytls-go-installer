@@ -285,7 +285,8 @@ value = match.group(1) if match else ""
 print(value.rsplit(":", 1)[-1].rstrip("]"))
 PY
 )" valid_port port
-        read -r -p 'TLS server name/SNI [optional]: ' sni
+        read -r -p 'TLS server name/SNI [www.cloudflare.com; use your own server domain if available]: ' sni
+        sni="${sni:-www.cloudflare.com}"
         if ! export_text="$("$MULTIUSER_HELPER" export --name "$name" --server "$server" --port "$port" --sni "$sni")"; then
           fail 'Could not export the client files.'
           pause
@@ -327,7 +328,7 @@ PY
           "${export_info[1]}" "${export_info[2]}" "${export_info[3]}"
         if [[ -n "$qr_path" ]]; then
           printf 'QR image:     %s\n\n' "$qr_path"
-          printf 'The QR contains an AnyTLS share URI for clients that support URI import. Import a JSON file when your sing-box app does not support URI QR import.\n\n'
+          printf 'The QR contains an AnyTLS URI with the selected SNI and insecure setting. Import a JSON file to retain ALPN and the device-specific uTLS fingerprint.\n\n'
           qrencode -t ANSIUTF8 "$uri"
         else
           printf '\n%sNo QR image was created. Install qrencode and retry if you also need a QR code.%s\n' "$YELLOW" "$RESET"
