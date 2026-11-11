@@ -38,7 +38,7 @@ def validate_host(value):
         return value
 
 
-def export(server, port, sni):
+def export(server, port, sni, variant):
     values = read_env()
     try:
         password = base64.b64decode(values["ANYTLS_PASSWORD_B64"], validate=True).decode("utf-8")
@@ -53,6 +53,9 @@ def export(server, port, sni):
 
     CLIENT_DIR.mkdir(parents=True, exist_ok=True)
     os.chmod(CLIENT_DIR, 0o700)
+    variant_dir = CLIENT_DIR / variant
+    variant_dir.mkdir(mode=0o700, exist_ok=True)
+    os.chmod(variant_dir, 0o700)
     profile_name = "AnyTLS-Go"
     tls = {
         "enabled": True,
@@ -91,7 +94,7 @@ def export(server, port, sni):
             ],
             "route": {"auto_detect_interface": True, "final": profile_name},
         }
-        platform_dir = CLIENT_DIR / platform
+        platform_dir = variant_dir / platform
         platform_dir.mkdir(mode=0o700, exist_ok=True)
         os.chmod(platform_dir, 0o700)
         path = platform_dir / f"{profile_name}.json"
@@ -103,7 +106,7 @@ def export(server, port, sni):
     query = urllib.parse.urlencode({"sni": sni, "insecure": "1"})
     uri = (f"anytls://{urllib.parse.quote(password, safe='')}@{host}:{port}/?{query}"
            f"#{urllib.parse.quote(profile_name, safe='')}")
-    qr_path = CLIENT_DIR / f"{profile_name}.png"
+    qr_path = variant_dir / f"{profile_name}.png"
     print(uri)
     print("\n".join(paths))
     print(qr_path)
@@ -116,9 +119,10 @@ def main():
     export_parser.add_argument("--server", required=True)
     export_parser.add_argument("--port", required=True, type=int)
     export_parser.add_argument("--sni", default=DEFAULT_SNI)
+    export_parser.add_argument("--variant", required=True, choices=("iran-gost-tunnel", "germany-direct"))
     args = parser.parse_args()
     try:
-        export(args.server, args.port, args.sni)
+        export(args.server, args.port, args.sni, args.variant)
     except (OSError, ValueError) as error:
         parser.exit(1, f"Error: {error}\n")
 

@@ -267,8 +267,8 @@ PY
 }
 
 client_export_menu() {
-  local server port sni default_port export_text uri qr_path show_choice
-  local -a export_info
+  local germany_ip iran_ip direct_port tunnel_port sni default_port direct_text tunnel_text show_choice
+  local -a direct_info tunnel_info
   if ! unit_installed "$ANYTLS_UNIT" || [[ ! -f "$ANYTLS_CONFIG" ]]; then
     printf '%sInstall the AnyTLS-Go server before exporting client profiles.%s\n' "$YELLOW" "$RESET"
     pause
@@ -292,52 +292,80 @@ value = match.group(1) if match else ""
 print(value.rsplit(":", 1)[-1].rstrip("]"))
 PY
 )"
-  printf 'Create single-password AnyTLS client profiles. Use the Iran IP when forwarding is configured, or the foreign server IP for a direct connection.\n\n'
-  read_valid 'Server address for clients' '' valid_host server
-  read_valid 'AnyTLS port' "$default_port" valid_port port
+  printf 'Create both AnyTLS-Go profiles using this server’s saved password:\n'
+  printf '  Germany direct: clients connect to the Germany server without GOST.\n'
+  printf '  Iran GOST tunnel: clients connect to Iran and GOST forwards to this Germany server.\n\n'
+  read_valid 'Germany public IP or DNS name (direct profile)' '' valid_host germany_ip
+  read_valid 'Iran public IP or DNS name (GOST tunnel profile)' '' valid_host iran_ip
+  direct_port="$default_port"
+  printf 'Germany AnyTLS-Go listening port: %s\n' "$direct_port"
+  read_valid 'Iran GOST client-entry port (must match the Agent setup)' "$direct_port" valid_port tunnel_port
   read -r -p 'TLS server name/SNI [www.cloudflare.com]: ' sni
   sni="${sni:-www.cloudflare.com}"
-  if ! export_text="$("$CLIENT_CONFIG_HELPER" export --server "$server" --port "$port" --sni "$sni")"; then
-    fail 'Could not export the client profiles.'
+  if ! direct_text="$("$CLIENT_CONFIG_HELPER" export --variant germany-direct --server "$germany_ip" --port "$direct_port" --sni "$sni")"; then
+    fail 'Could not export the Germany direct profiles.'
     pause
     return
   fi
-  mapfile -t export_info <<< "$export_text"
-  (( ${#export_info[@]} == 5 )) || { fail 'The profile exporter returned incomplete information.'; pause; return; }
-  uri="${export_info[0]}"
-  qr_path="${export_info[4]}"
-  if command -v qrencode >/dev/null 2>&1; then
-    if qrencode -t PNG -s 6 -o "$qr_path" "$uri"; then
-      printf '\nQR image: %s\n' "$qr_path"
-      qrencode -t ANSIUTF8 "$uri" || true
-    else
-      fail 'The JSON files were created, but QR generation failed.'
-    fi
-  else
-    printf '\n%sqrencode is unavailable; JSON files were created without a QR image.%s\n' "$YELLOW" "$RESET"
+  mapfile -t direct_info <<< "$direct_text"
+  (( ${#direct_info[@]} == 5 )) || { fail 'The direct profile exporter returned incomplete information.'; pause; return; }
+  if ! tunnel_text="$("$CLIENT_CONFIG_HELPER" export --variant iran-gost-tunnel --server "$iran_ip" --port "$tunnel_port" --sni "$sni")"; then
+    fail 'Could not export the Iran GOST tunnel profiles.'
+    pause
+    return
   fi
-  printf '\nAndroid JSON: %s\niOS JSON:     %s\nWindows JSON: %s\n' \
-    "${export_info[1]}" "${export_info[2]}" "${export_info[3]}"
-  printf '\nUse the AnyTLS QR/link in NekoBox. The JSON DNS route applies to full sing-box configs; NekoBox imports only the outbound and its URL test uses direct DNS, so a missing-default-interface test error may remain. A failed URL test alone does not prove the proxy is down. Treat these files and the QR as login credentials.\n'
-  printf '\nSelect a profile to print as plain JSON for copying:\n'
-  menu_item 1 'Show Android JSON'
-  menu_item 2 'Show iOS JSON'
-  menu_item 3 'Show Windows JSON'
+  mapfile -t tunnel_info <<< "$tunnel_text"
+  (( ${#tunnel_info[@]} == 5 )) || { fail 'The tunnel profile exporter returned incomplete information.'; pause; return; }
+  if command -v qrencode >/dev/null 2>&1; then
+    qrencode -t PNG -s 6 -o "${tunnel_info[4]}" "${tunnel_info[0]}" || fail 'Iran tunnel JSON files were created, but its QR image could not be generated.'
+    qrencode -t PNG -s 6 -o "${direct_info[4]}" "${direct_info[0]}" || fail 'Germany direct JSON files were created, but its QR image could not be generated.'
+  else
+    printf '\n%sqrencode is unavailable; JSON files were created without QR images.%s\n' "$YELLOW" "$RESET"
+  fi
+  printf '\n%sIran GOST tunnel — Server %s:%s%s\n' "$CYAN" "$iran_ip" "$tunnel_port" "$RESET"
+  printf 'QR image:   %s\nAndroid:    %s\niOS:        %s\nWindows:    %s\n' \
+    "${tunnel_info[4]}" "${tunnel_info[1]}" "${tunnel_info[2]}" "${tunnel_info[3]}"
+  printf '\n%sGermany direct — Server %s:%s%s\n' "$CYAN" "$germany_ip" "$direct_port" "$RESET"
+  printf 'QR image:   %s\nAndroid:    %s\niOS:        %s\nWindows:    %s\n' \
+    "${direct_info[4]}" "${direct_info[1]}" "${direct_info[2]}" "${direct_info[3]}"
+  printf '\nThe QR/link and JSON files use the profile name AnyTLS-Go. The tunnel port must equal the client-entry port exposed by GOST on Iran. These files contain the AnyTLS password; treat them as login credentials. NekoBox URL tests may still show a DNS/default-interface warning even when the proxy works.\n'
+  printf '\nSelect what to print in this terminal for copying or scanning:\n'
+  menu_item 1 'Show Iran GOST tunnel QR'
+  menu_item 2 'Show Germany direct QR'
+  menu_item 3 'Show Iran tunnel Android JSON'
+  menu_item 4 'Show Germany direct Android JSON'
+  menu_item 5 'Show Iran tunnel iOS JSON'
+  menu_item 6 'Show Germany direct iOS JSON'
+  menu_item 7 'Show Iran tunnel Windows JSON'
+  menu_item 8 'Show Germany direct Windows JSON'
   menu_item 0 'Skip'
   while true; do
     read -r -p 'Select an option: ' show_choice
     case "$show_choice" in
-      1|2|3|0) break ;;
+      0|1|2|3|4|5|6|7|8) break ;;
       *) printf '%sInvalid option.%s\n' "$YELLOW" "$RESET" ;;
     esac
   done
   case "$show_choice" in
-    1) header; printf 'Android sing-box JSON — copy the JSON text below:\n\n'; cat "${export_info[1]}" ;;
-    2) header; printf 'iOS sing-box JSON — copy the JSON text below:\n\n'; cat "${export_info[2]}" ;;
-    3) header; printf 'Windows sing-box JSON — copy the JSON text below:\n\n'; cat "${export_info[3]}" ;;
+    1)
+      header
+      printf 'Iran GOST tunnel — scan this AnyTLS-Go QR in NekoBox:\n\n'
+      if command -v qrencode >/dev/null 2>&1; then qrencode -t ANSIUTF8 "${tunnel_info[0]}"; else fail 'qrencode is not installed; use the PNG path or install qrencode.'; fi
+      ;;
+    2)
+      header
+      printf 'Germany direct — scan this AnyTLS-Go QR in NekoBox:\n\n'
+      if command -v qrencode >/dev/null 2>&1; then qrencode -t ANSIUTF8 "${direct_info[0]}"; else fail 'qrencode is not installed; use the PNG path or install qrencode.'; fi
+      ;;
+    3) header; printf 'Iran GOST tunnel — Android sing-box JSON:\n\n'; cat "${tunnel_info[1]}" ;;
+    4) header; printf 'Germany direct — Android sing-box JSON:\n\n'; cat "${direct_info[1]}" ;;
+    5) header; printf 'Iran GOST tunnel — iOS sing-box JSON:\n\n'; cat "${tunnel_info[2]}" ;;
+    6) header; printf 'Germany direct — iOS sing-box JSON:\n\n'; cat "${direct_info[2]}" ;;
+    7) header; printf 'Iran GOST tunnel — Windows sing-box JSON:\n\n'; cat "${tunnel_info[3]}" ;;
+    8) header; printf 'Germany direct — Windows sing-box JSON:\n\n'; cat "${direct_info[3]}" ;;
     0) ;;
   esac
-  unset uri export_info
+  unset direct_text tunnel_text direct_info tunnel_info
   pause
 }
 
@@ -918,6 +946,7 @@ setup_reverse() {
   header
   printf '%sReverse TCP tunnel setup with GOST%s\n\n' "$GREEN" "$RESET"
   printf 'Configure the Relay on the client-facing server, then configure the Agent on the server running AnyTLS-Go. Both roles use the anytls-tunnel service name on their respective hosts.\n'
+  printf 'For AnyTLS-Go on Germany with clients using the Iran IP: Relay on Iran, Agent on Germany.\n'
   printf 'Setting up a role replaces the existing GOST mode on that server.\n\n'
   menu_item 1 'Configure Relay server (client entry point)'
   menu_item 2 'Configure reverse Agent (AnyTLS backend)'
