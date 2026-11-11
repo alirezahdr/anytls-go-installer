@@ -72,7 +72,7 @@ def export(server, port, sni):
         config = {
             "log": {"level": "info", "timestamp": True},
             "dns": {
-                "servers": [{"type": "udp", "tag": "remote-dns", "server": "1.1.1.1"}],
+                "servers": [{"type": "udp", "tag": "remote-dns", "server": "1.1.1.1", "detour": "anytls-out"}],
                 "final": "remote-dns",
             },
             "inbounds": [
