@@ -7,8 +7,6 @@ import ipaddress
 import json
 import os
 import re
-import secrets
-import time
 import urllib.parse
 from pathlib import Path
 
@@ -55,12 +53,7 @@ def export(server, port, sni):
 
     CLIENT_DIR.mkdir(parents=True, exist_ok=True)
     os.chmod(CLIENT_DIR, 0o700)
-    timestamp = time.strftime('%Y%m%d-%H%M%S', time.gmtime())
-    while True:
-        prefix = f"anytls-{timestamp}-{secrets.token_hex(3)}"
-        generated_paths = [CLIENT_DIR / f"{prefix}-{platform}.json" for platform in FINGERPRINTS]
-        if not any(path.exists() for path in generated_paths) and not (CLIENT_DIR / f"{prefix}.png").exists():
-            break
+    profile_name = "AnyTLS-Go"
     tls = {
         "enabled": True,
         "server_name": sni,
@@ -72,7 +65,7 @@ def export(server, port, sni):
         config = {
             "log": {"level": "info", "timestamp": True},
             "dns": {
-                "servers": [{"type": "udp", "tag": "remote-dns", "server": "1.1.1.1", "detour": "anytls-out"}],
+                "servers": [{"type": "udp", "tag": "remote-dns", "server": "1.1.1.1", "detour": profile_name}],
                 "final": "remote-dns",
             },
             "inbounds": [
@@ -88,7 +81,7 @@ def export(server, port, sni):
             "outbounds": [
                 {
                     "type": "anytls",
-                    "tag": "anytls-out",
+                    "tag": profile_name,
                     "server": server,
                     "server_port": port,
                     "password": password,
@@ -96,9 +89,12 @@ def export(server, port, sni):
                 },
                 {"type": "direct", "tag": "direct"},
             ],
-            "route": {"auto_detect_interface": True, "final": "anytls-out"},
+            "route": {"auto_detect_interface": True, "final": profile_name},
         }
-        path = CLIENT_DIR / f"{prefix}-{platform}.json"
+        platform_dir = CLIENT_DIR / platform
+        platform_dir.mkdir(mode=0o700, exist_ok=True)
+        os.chmod(platform_dir, 0o700)
+        path = platform_dir / f"{profile_name}.json"
         path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         os.chmod(path, 0o600)
         paths.append(str(path))
@@ -106,8 +102,8 @@ def export(server, port, sni):
     host = f"[{server}]" if ":" in server else server
     query = urllib.parse.urlencode({"sni": sni, "insecure": "1"})
     uri = (f"anytls://{urllib.parse.quote(password, safe='')}@{host}:{port}/?{query}"
-           f"#{urllib.parse.quote(prefix, safe='')}")
-    qr_path = CLIENT_DIR / f"{prefix}.png"
+           f"#{urllib.parse.quote(profile_name, safe='')}")
+    qr_path = CLIENT_DIR / f"{profile_name}.png"
     print(uri)
     print("\n".join(paths))
     print(qr_path)

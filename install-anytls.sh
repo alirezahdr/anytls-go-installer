@@ -5,11 +5,9 @@ export LC_ALL=C
 
 readonly REPO_API='https://api.github.com/repos/anytls/anytls-go/releases/latest'
 readonly PANEL_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/anytls-panel.sh'
-readonly USERS_HELPER_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/anytls-users.py'
 readonly CLIENT_HELPER_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/anytls-client-config.py'
 readonly INSTALLER_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/install-anytls.sh'
 readonly PANEL_FILE='/usr/local/bin/anytls-panel'
-readonly USERS_HELPER_FILE='/usr/local/bin/anytls-users.py'
 readonly CLIENT_HELPER_FILE='/usr/local/bin/anytls-client-config.py'
 readonly INSTALLER_FILE='/usr/local/libexec/anytls-installer'
 readonly SERVICE_NAME='anytls'
@@ -87,9 +85,6 @@ if (( OPEN_PANEL )); then
     "$PANEL_URL" --output "$TMP_DIR/anytls-panel"
   install -o root -g root -m 0755 "$TMP_DIR/anytls-panel" "$PANEL_FILE"
   curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
-    "$USERS_HELPER_URL" --output "$TMP_DIR/anytls-users.py"
-  install -o root -g root -m 0755 "$TMP_DIR/anytls-users.py" "$USERS_HELPER_FILE"
-  curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
     "$CLIENT_HELPER_URL" --output "$TMP_DIR/anytls-client-config.py"
   install -o root -g root -m 0755 "$TMP_DIR/anytls-client-config.py" "$CLIENT_HELPER_FILE"
   curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
@@ -132,18 +127,21 @@ if (( ! INSTALL_ANYTLS && ! RESTORE_ANYTLS_GO )); then
 fi
 
 if (( SINGBOX_BACKEND && ! RESTORE_ANYTLS_GO )); then
-  printf '\nThe existing multi-user sing-box backend is preserved. Use the panel to manage it.\n'
+  printf '\nA legacy sing-box backend is running. Open the panel and choose Restore AnyTLS-Go single-user mode to return to AnyTLS-Go.\n'
   if (( OPEN_PANEL )); then "$PANEL_FILE"; fi
   exit 0
 fi
 if (( RESTORE_ANYTLS_GO && ! SINGBOX_BACKEND )); then
-  die 'The explicit restore option is only for a server currently using the sing-box multi-user backend.'
+  die 'The restore option is only for a server currently using the legacy sing-box backend.'
 fi
 
 ensure_qrencode || die 'Could not install qrencode. AnyTLS installation stopped; install qrencode with your Linux package manager and retry.'
 
 RESTORE_SINGBOX=0
+RESTORE_EXPIRY_TIMER_ENABLED=0
 PASSWORD_B64=''
+PASSWORD_GENERATED=0
+GENERATED_PASSWORD=''
 if (( RESTORE_ANYTLS_GO )); then
   printf '\nThis installer will restore the original single-password AnyTLS-Go backend. It will use the first active account password and keep the existing sing-box files and client exports as backups.\n'
   mapfile -t RESTORE_INFO < <(python3 - "$CONFIG_FILE" /etc/anytls/users.json <<'PY'
@@ -200,24 +198,12 @@ PY
   if [[ -n "$PASSWORD_B64" ]]; then
     printf 'The shared AnyTLS-Go password will be taken from active account: %s\n' "$RESTORE_ACCOUNT"
   else
-    printf 'No unexpired sing-box account was found. Choose a new shared AnyTLS-Go password.\n'
-    while true; do
-      read -r -s -p 'AnyTLS password (at least 16 characters): ' PASSWORD
-      printf '\n'
-      read -r -s -p 'Confirm password: ' PASSWORD_CONFIRM
-      printf '\n'
-      if (( ${#PASSWORD} < 16 )); then
-        printf 'The password must contain at least 16 characters.\n' >&2
-      elif [[ "$PASSWORD" != "$PASSWORD_CONFIRM" ]]; then
-        printf 'The passwords do not match.\n' >&2
-      else
-        PASSWORD_B64="$(printf '%s' "$PASSWORD" | base64 | tr -d '\n')"
-        unset PASSWORD PASSWORD_CONFIRM
-        RESTORE_ACCOUNT='new password'
-        break
-      fi
-      unset PASSWORD PASSWORD_CONFIRM
-    done
+    printf 'No active sing-box account was found. A new secure password will be generated.\n'
+    GENERATED_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+    [[ "$GENERATED_PASSWORD" =~ ^[0-9a-f]{32}$ ]] || die 'Could not generate a secure AnyTLS password.'
+    PASSWORD_B64="$(printf '%s' "$GENERATED_PASSWORD" | base64 | tr -d '\n')"
+    PASSWORD_GENERATED=1
+    RESTORE_ACCOUNT='new generated password'
   fi
   if [[ -t 0 ]]; then
     read -r -p 'Type yes to restore AnyTLS-Go now: ' restore_confirmation
@@ -236,7 +222,7 @@ else
   if [[ -t 0 ]]; then
     read -r -p 'Server listen IP [0.0.0.0 for all IPv4 interfaces]: ' SERVER_IP
   else
-    die 'Run this script from an interactive terminal to enter the IP, port, and password.'
+    die 'Run this script from an interactive terminal to enter the listen IP and port; the password is generated automatically.'
   fi
   SERVER_IP="${SERVER_IP:-0.0.0.0}"
 
@@ -262,22 +248,12 @@ while true; do
   printf 'The port must be a number between 1 and 65535.\n' >&2
 done
 
-while true; do
-  read -r -s -p 'AnyTLS password (at least 16 characters): ' PASSWORD
-  printf '\n'
-  read -r -s -p 'Confirm password: ' PASSWORD_CONFIRM
-  printf '\n'
-  if (( ${#PASSWORD} < 16 )); then
-    printf 'The password must contain at least 16 characters.\n' >&2
-  elif [[ "$PASSWORD" != "$PASSWORD_CONFIRM" ]]; then
-    printf 'The passwords do not match.\n' >&2
-  else
-    break
-  fi
-done
-unset PASSWORD_CONFIRM
+GENERATED_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+[[ "$GENERATED_PASSWORD" =~ ^[0-9a-f]{32}$ ]] || die 'Could not generate a secure AnyTLS password.'
+PASSWORD="$GENERATED_PASSWORD"
 PASSWORD_B64="$(printf '%s' "$PASSWORD" | base64 | tr -d '\n')"
 unset PASSWORD
+PASSWORD_GENERATED=1
 fi
 
 case "$(uname -m)" in
@@ -384,6 +360,9 @@ if (( RESTORE_SINGBOX )); then
   [[ -e "$BIN_FILE" ]] && cp -a "$BIN_FILE" "$RESTORE_BACKUP_DIR/anytls-server"
   [[ -e "$SERVICE_FILE" ]] && cp -a "$SERVICE_FILE" "$RESTORE_BACKUP_DIR/anytls.service"
   [[ -e /usr/local/bin/anytls-users.py ]] && cp -a /usr/local/bin/anytls-users.py "$RESTORE_BACKUP_DIR/anytls-users.py"
+  [[ -e /usr/local/bin/anytls-sing-box ]] && cp -a /usr/local/bin/anytls-sing-box "$RESTORE_BACKUP_DIR/anytls-sing-box"
+  if systemctl is-enabled --quiet anytls-users-expiry.timer 2>/dev/null; then RESTORE_EXPIRY_TIMER_ENABLED=1; fi
+  systemctl disable --now anytls-users-expiry.timer >/dev/null 2>&1 || true
 fi
 
 if ! getent passwd anytls >/dev/null 2>&1; then
@@ -476,16 +455,33 @@ if ! systemctl enable --now "$SERVICE_NAME" || ! systemctl is-active --quiet "$S
     [[ -e "$RESTORE_BACKUP_DIR/anytls-users.py" ]] && cp -a "$RESTORE_BACKUP_DIR/anytls-users.py" /usr/local/bin/anytls-users.py
     systemctl daemon-reload
     systemctl enable --now "$SERVICE_NAME" >/dev/null 2>&1 || true
+    if (( RESTORE_EXPIRY_TIMER_ENABLED )); then systemctl enable --now anytls-users-expiry.timer >/dev/null 2>&1 || true; fi
     die "The AnyTLS-Go restore failed; the previous sing-box service files were restored. Backup: $RESTORE_BACKUP_DIR"
   fi
   die 'The service was installed but could not be started. Review the logs above.'
 fi
 
+if (( RESTORE_SINGBOX )); then
+  rm -f -- /usr/local/bin/anytls-users.py /usr/local/bin/anytls-sing-box \
+    /etc/systemd/system/anytls-users-expiry.service /etc/systemd/system/anytls-users-expiry.timer \
+    /etc/anytls/users.json /etc/anytls/config.json /etc/anytls/server.crt /etc/anytls/server.key
+  systemctl daemon-reload
+fi
+
 printf '\nAnyTLS-Go %s installation is complete.\n' "$VERSION"
 printf 'Listen address: %s\n' "$LISTEN"
 if (( RESTORE_SINGBOX )); then
-  printf 'The password from account %s is now the shared AnyTLS-Go password. Existing sing-box data and client exports were retained.\n' "$RESTORE_ACCOUNT"
+  if (( PASSWORD_GENERATED )); then
+    printf 'A new generated password is now the shared AnyTLS-Go password. Existing sing-box data and client exports were retained.\n'
+  else
+    printf 'The password from account %s is now the shared AnyTLS-Go password. Existing sing-box data and client exports were retained.\n' "$RESTORE_ACCOUNT"
+  fi
   printf 'Backup: %s\n' "$RESTORE_BACKUP_DIR"
+fi
+if (( PASSWORD_GENERATED )); then
+  printf '\nGenerated AnyTLS password (save it now): %s\n' "$GENERATED_PASSWORD"
+  read -r -p 'Press Enter after saving this password to continue... ' _
+  unset GENERATED_PASSWORD
 fi
 printf 'Service status: '
 systemctl is-active "$SERVICE_NAME"

@@ -44,21 +44,21 @@ GOST relays the TCP stream to the configured foreign address and port; it does n
 
 The wizard downloads the latest stable GOST release for Linux amd64 or arm64 from the official project and checks its SHA-256 digest before installing it. Forwarding runs as a systemd service, starts at boot, and restarts automatically after a failure. The service unit keeps the name anytls-tunnel for compatibility with the existing panel commands.
 
-## Multiple accounts and client profiles
+## Single-user server and client profiles
 
-The default server is upstream AnyTLS-Go and uses one shared password. Before migrating, **Export shared-password client QR and JSON** still creates client profiles for that password. To enable multiple passwords on the same port, open **AnyTLS server management → Manage accounts and client configs** and confirm the migration to the sing-box server backend. The current AnyTLS-Go password is retained as the first account. The panel can list, add, and revoke accounts, set each account's expiration, and export a QR code plus Android, iOS, and Windows sing-box JSON profiles. New passwords are shown once. Existing client exports are kept when an account is removed or expires.
+The server runs the upstream AnyTLS-Go implementation with one shared password. A fresh installation generates a random 32-character password and prints it once so you can save it; the password is stored in the root-only server settings. Reconfiguring the listen IP or port keeps the current password. The panel exports a QR/link for NekoBox and JSON profiles for Android, iOS, and Windows sing-box clients. The profile name is `AnyTLS-Go` in the QR link and JSON outbound tag; each JSON file is named `AnyTLS-Go.json` inside its platform directory.
 
 Choose the Iran server IP when GOST forwarding is configured, or the foreign server IP for a direct connection. For NekoBox, import the AnyTLS QR/link. The JSON profiles are full sing-box configurations: they enable `tls.insecure`, set ALPN to `h2` and `http/1.1`, use a device-specific uTLS fingerprint (`android`, `ios`, or `chrome` for Windows), and send DNS through the AnyTLS outbound. NekoBox imports sing-box outbound nodes without their routing rules, and its URL test uses direct DNS; therefore, its `cp.cloudflare.com` / “missing default interface” test error may remain. A failed URL test alone does not prove the AnyTLS connection failed; confirm by opening a website through the connected proxy. The default SNI is `www.cloudflare.com`; replace it with your own server domain when available. SNI does not route traffic through Cloudflare or guarantee that a connection will pass filtering. `tls.insecure` disables certificate verification and can expose the connection to interception. uTLS fingerprint imitation does not guarantee that traffic will avoid detection.
 
-Migration validates the generated sing-box configuration before changing the service, avoids automatic network-interface discovery for compatibility with OpenVZ/venet hosts, and restores the previous AnyTLS-Go service files if the new service fails to remain active. To return explicitly to AnyTLS-Go, run `sudo /usr/local/libexec/anytls-installer --restore-anytls-go`; the first active account password becomes the shared password. Per-account device-count and data-volume limits are not supported; use one account per device if you need to revoke devices separately.
+If a server still uses the legacy sing-box multi-user backend, choose **AnyTLS server management → Restore AnyTLS-Go single-user mode**. The first active account password becomes the shared AnyTLS-Go password. Existing sing-box settings and client exports are saved in a backup directory.
 
 ## Panel features
 
 - Show status and start, stop, restart, enable at boot, or disable at boot for the AnyTLS server and forwarding service.
 - Review or follow service logs.
-- Change the AnyTLS server listen IP and port; change the shared password while using AnyTLS-Go.
-- Manage multiple accounts and expiration after enabling the sing-box backend.
-- Export per-account QR codes and Android, iOS, and Windows sing-box JSON profiles.
+- Change the AnyTLS server listen IP and port while keeping the shared password.
+- Restore legacy sing-box installations to the AnyTLS-Go single-user backend.
+- Export an AnyTLS-Go QR code and Android, iOS, and Windows sing-box JSON profiles.
 - Set up or update the direct GOST TCP forward.
 - View the non-secret forwarding address and port.
 - Display the equivalent systemd commands.
@@ -156,13 +156,13 @@ sudo anytls-panel
 
 GOST جریان TCP را به آدرس و پورت سرور خارج منتقل می‌کند و به رمز AnyTLS نیاز ندارد. سرور AnyTLS باید از قبل روی سرور خارج فعال باشد و سرور ایران بتواند به آن دسترسی داشته باشد. پورت ورودی TCP را در فایروال سرور ایران و فایروال ارائه‌دهنده باز کنید و دسترسی خروجی سرور ایران به مقصد AnyTLS خارج را نیز مجاز کنید.
 
-## مدیریت کاربران و ساخت پروفایل کلاینت
+## ساخت پروفایل کلاینت
 
-سرور به‌صورت پیش‌فرض با AnyTLS-Go اصلی و یک رمز مشترک نصب می‌شود. پیش از مهاجرت، گزینهٔ **Export shared-password client QR and JSON** برای همین رمز فایل‌های کلاینت را می‌سازد. برای فعال‌کردن چند رمز روی یک پورت، مسیر **AnyTLS server management → Manage accounts and client configs** را باز کنید و مهاجرت به بک‌اند sing-box را تأیید کنید. رمز فعلی به‌عنوان حساب اول نگه داشته می‌شود. پنل امکان نمایش حساب‌ها، افزودن و حذف حساب، تعیین تاریخ انقضا، و ساخت QR و فایل JSON sing-box برای Android، iOS و Windows را می‌دهد. رمز حساب تازه فقط یک‌بار نمایش داده می‌شود. فایل‌های خروجی قبلی با حذف یا انقضای حساب پاک نمی‌شوند.
+سرور با پیاده‌سازی اصلی AnyTLS-Go و یک رمز مشترک اجرا می‌شود. نصب تازه یک رمز تصادفی ۳۲ کاراکتری می‌سازد و آن را یک‌بار برای ذخیره‌کردن نشان می‌دهد؛ رمز در تنظیمات فقط‌خواندنی برای root ذخیره می‌شود. تغییر IP شنود یا پورت، رمز فعلی را نگه می‌دارد. پنل برای NekoBox لینک و QR و برای sing-box در Android، iOS و Windows فایل JSON می‌سازد. نام پروفایل در QR و تگ outbound فایل JSON برابر `AnyTLS-Go` است و نام هر فایل `AnyTLS-Go.json` در پوشهٔ پلتفرم مربوطه خواهد بود.
 
 برای اتصال مستقیم IP سرور خارج را وارد کنید؛ اگر فوروارد GOST روی ایران دارید، IP عمومی ایران را وارد کنید. برای NekoBox، QR یا لینک AnyTLS را وارد کنید. فایل‌های JSON پیکربندی کامل sing-box هستند: `tls.insecure`، ALPN برابر `h2` و `http/1.1`، fingerprint متناسب با دستگاه (`android`، `ios` یا `chrome` برای Windows) و DNS از مسیر AnyTLS را تنظیم می‌کنند. NekoBox از JSONهای sing-box فقط outbound را وارد می‌کند و قوانین مسیریابی را نادیده می‌گیرد؛ تست URL آن نیز DNS مستقیم دارد. به همین دلیل ممکن است خطای `cp.cloudflare.com` یا `missing default interface` در تست باقی بماند. خطای تست به‌تنهایی ثابت نمی‌کند اتصال AnyTLS برقرار نشده؛ پس از اتصال، یک سایت را در مرورگر باز کنید. SNI پیش‌فرض `www.cloudflare.com` است؛ در صورت داشتن دامنهٔ خودتان آن را جایگزین کنید. SNI اتصال را از مسیر Cloudflare عبور نمی‌دهد و عبور از فیلترینگ را تضمین نمی‌کند. گزینهٔ `tls.insecure` بررسی گواهی را غیرفعال می‌کند و می‌تواند اتصال را در برابر رهگیری آسیب‌پذیر کند. تقلید uTLS نیز تضمینی برای شناسایی‌نشدن ترافیک نیست.
 
-مهاجرت پیش از تغییر سرویس، کانفیگ sing-box را بررسی می‌کند و برای سازگاری با برخی سرورهای OpenVZ/venet، تشخیص خودکار رابط شبکه را خاموش می‌گذارد. اگر سرویس جدید فعال نماند، فایل‌ها و سرویس قبلی AnyTLS-Go برگردانده می‌شوند. برای برگشت آگاهانه به AnyTLS-Go اجرا کنید: `sudo /usr/local/libexec/anytls-installer --restore-anytls-go`. رمز اولین حساب فعال به رمز مشترک تبدیل می‌شود. محدودیت تعداد دستگاه یا حجم جداگانه برای هر حساب پشتیبانی نمی‌شود؛ برای لغو دسترسی دستگاه‌ها، یک حساب جدا برای هر دستگاه بسازید.
+اگر سروری هنوز از بک‌اند قدیمی sing-box چندکاربره استفاده می‌کند، از مسیر **AnyTLS server management → Restore AnyTLS-Go single-user mode** برگردید. رمز اولین حساب فعال به رمز مشترک AnyTLS-Go تبدیل می‌شود و تنظیمات و خروجی‌های sing-box در پوشهٔ پشتیبان نگه داشته می‌شوند.
 
 راهنما آخرین نسخهٔ پایدار رسمی GOST برای Linux amd64 یا arm64 را دانلود و پیش از نصب SHA-256 آن را بررسی می‌کند. فوروارد به‌صورت سرویس systemd اجرا می‌شود، پس از راه‌اندازی مجدد سرور خودکار بالا می‌آید و در صورت خطا دوباره اجرا می‌شود. برای سازگاری با فرمان‌های پنل، نام سرویس anytls-tunnel باقی مانده است.
 
@@ -170,9 +170,9 @@ GOST جریان TCP را به آدرس و پورت سرور خارج منتقل 
 
 - نمایش وضعیت و اجرای start، stop، restart، enable هنگام بوت یا disable برای سرور AnyTLS و سرویس فوروارد.
 - مشاهده یا دنبال‌کردن گزارش سرویس‌ها.
-- تغییر IP شنود و پورت؛ تغییر رمز مشترک و خروجی QR/JSON رمز مشترک تا زمانی که بک‌اند AnyTLS-Go فعال است.
-- مدیریت حساب‌ها و تاریخ انقضا پس از فعال‌کردن بک‌اند sing-box.
-- ساخت QR و فایل JSON sing-box برای هر حساب و پلتفرم Android، iOS و Windows.
+- تغییر IP شنود و پورت با حفظ رمز مشترک.
+- بازگرداندن نصب‌های قدیمی sing-box به حالت تک‌کاربرهٔ AnyTLS-Go.
+- ساخت QR برای AnyTLS-Go و فایل JSON sing-box برای Android، iOS و Windows.
 - راه‌اندازی یا تنظیم دوبارهٔ فوروارد مستقیم TCP با GOST.
 - نمایش آدرس و پورت فوروارد؛ رمز AnyTLS در این تنظیمات ذخیره نمی‌شود.
 - نمایش دستورهای معادل systemd.
@@ -220,8 +220,8 @@ sudo systemctl restart anytls
 ## پیش‌نیازها و نکته‌ها
 
 - لینوکس دارای systemd و دسترسی root یا sudo.
-- curl، Python 3 و ابزارهای استاندارد مدیریت حساب.
-- نصب‌کننده هنگام نصب AnyTLS یا بازکردن پنل، qrencode را خودکار نصب می‌کند تا خروجی QR آماده باشد. package managerهای پشتیبانی‌شده apt، dnf، yum، zypper و apk هستند. OpenSSL برای ساخت گواهی TLS هنگام مهاجرت به حالت چندکاربره لازم است.
+- curl، Python 3 و ابزارهای استاندارد سیستم.
+- نصب‌کننده هنگام نصب AnyTLS یا بازکردن پنل، qrencode را خودکار نصب می‌کند تا خروجی QR آماده باشد. package managerهای پشتیبانی‌شده apt، dnf، yum، zypper و apk هستند.
 - فوروارد GOST از Linux amd64 و arm64 پشتیبانی می‌کند.
 - فوروارد روی IP انتخاب‌شده در راهنما شنود می‌کند. برای پذیرش اتصال روی همهٔ رابط‌های IPv4 مقدار **0.0.0.0** را انتخاب کنید و دسترسی را با فایروال محدود کنید.
 - پورت ورودی باید روی سرور ایران آزاد باشد.

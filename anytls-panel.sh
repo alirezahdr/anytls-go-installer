@@ -5,8 +5,6 @@ export LC_ALL=C
 
 readonly ANYTLS_UNIT='anytls'
 readonly ANYTLS_CONFIG='/etc/anytls/anytls.env'
-readonly USERS_DB='/etc/anytls/users.json'
-readonly MULTIUSER_HELPER='/usr/local/bin/anytls-users.py'
 readonly CLIENT_CONFIG_HELPER='/usr/local/bin/anytls-client-config.py'
 readonly CLIENT_DIR='/root/anytls-clients'
 readonly INSTALLER_FILE='/usr/local/libexec/anytls-installer'
@@ -118,27 +116,6 @@ read_valid() {
   done
 }
 
-ask_password() {
-  local first second length
-  while true; do
-    read -r -s -p 'AnyTLS password (at least 16 characters): ' first
-    printf '\n'
-    read -r -s -p 'Confirm password: ' second
-    printf '\n'
-    length="$(printf '%s' "$first" | wc -m)"
-    if (( length < 16 )); then
-      printf '%sThe password must contain at least 16 characters.%s\n' "$YELLOW" "$RESET"
-    elif [[ "$first" != "$second" ]]; then
-      printf '%sThe passwords do not match.%s\n' "$YELLOW" "$RESET"
-    else
-      REPLY="$first"
-      unset second
-      return 0
-    fi
-    unset first second
-  done
-}
-
 unit_installed() {
   systemctl cat "$1" >/dev/null 2>&1
 }
@@ -197,179 +174,8 @@ read_config_value() {
   sed -n "s/^$key=//p" "$file" | head -n 1
 }
 
-valid_username() {
-  [[ "$1" =~ ^[A-Za-z0-9_.-]{1,32}$ ]]
-}
-
-valid_days() {
-  [[ "$1" =~ ^[0-9]{1,5}$ ]] && (( 10#$1 <= 36500 ))
-}
-
-account_menu() {
-  local choice name days confirmation password server port sni export_text uri qr_path show_choice
-  local -a export_info
-  if [[ ! -x "$MULTIUSER_HELPER" ]]; then
-    fail 'Account management helper is missing. Run the latest quick installer to update the panel files.'
-    pause
-    return
-  fi
-
-  if [[ "$(read_config_value ANYTLS_BACKEND "$ANYTLS_CONFIG")" != 'sing-box' ]]; then
-    header
-    printf '%sMulti-user mode switches this server from AnyTLS-Go to sing-box.%s\n' "$YELLOW" "$RESET"
-    printf 'The current password will remain active as the first account. The configuration is checked before switching; if the new service does not stay active, the previous AnyTLS-Go setup is restored.\n\n'
-    read_valid 'Name for the current account' 'default' valid_username name
-    read_valid 'Validity in days (0 means no expiration)' '0' valid_days days
-    read -r -p 'Type yes to enable multi-user mode: ' confirmation
-    if [[ "$confirmation" != 'yes' ]]; then
-      printf 'Migration cancelled. The current server was not changed.\n'
-      pause
-      return
-    fi
-    if ! "$MULTIUSER_HELPER" migrate --name "$name" --days "$days"; then
-      pause
-      return
-    fi
-    printf '%sMulti-user mode is active. The existing password is now account %s.%s\n' "$GREEN" "$name" "$RESET"
-    pause
-  fi
-
-  while true; do
-    "$MULTIUSER_HELPER" expire >/dev/null 2>&1 || true
-    header
-    printf '%sAccount management%s  |  %sExpiry enforced%s  |  %sPer-user device/data caps unavailable%s\n\n' \
-      "$MAGENTA" "$RESET" "$GREEN" "$RESET" "$YELLOW" "$RESET"
-    menu_item 1 'List accounts'
-    menu_item 2 'Add account'
-    menu_item 3 'Remove account'
-    menu_item 4 'Export Android / iOS / Windows sing-box JSON and QR'
-    menu_item 5 'Device and data limit details'
-    menu_item 0 'Back'
-    read -r -p 'Select an option: ' choice
-    case "$choice" in
-      1)
-        header
-        if [[ -s "$USERS_DB" ]]; then "$MULTIUSER_HELPER" list; else printf '%sNo accounts are configured.%s\n' "$YELLOW" "$RESET"; fi
-        pause
-        ;;
-      2)
-        read_valid 'New account name' '' valid_username name
-        read_valid 'Validity in days (0 means no expiration)' '30' valid_days days
-        if password="$("$MULTIUSER_HELPER" add --name "$name" --days "$days")"; then
-          printf '\n%sAccount created. Save this password now; it will not be shown again:%s\n\n%s\n' "$GREEN" "$RESET" "$password"
-        else
-          fail 'Could not add the account. Review the message above.'
-        fi
-        unset password
-        pause
-        ;;
-      3)
-        printf 'Current accounts:\n'
-        "$MULTIUSER_HELPER" list
-        read_valid 'Account name to remove' '' valid_username name
-        read -r -p "Type yes to revoke account $name: " confirmation
-        if [[ "$confirmation" == 'yes' ]]; then
-          "$MULTIUSER_HELPER" remove --name "$name" || fail 'Could not remove the account.'
-        else
-          printf 'Cancelled.\n'
-        fi
-        pause
-        ;;
-      4)
-        printf 'Current accounts:\n'
-        "$MULTIUSER_HELPER" list
-        read_valid 'Account name to export' '' valid_username name
-        read_valid 'Server address clients should use (Iran IP or foreign address)' '' valid_host server
-        read_valid 'AnyTLS port' "$(python3 - "$ANYTLS_CONFIG" <<'PY'
-import re, sys
-text = open(sys.argv[1], encoding="utf-8").read()
-match = re.search(r"^ANYTLS_LISTEN=(.*)$", text, re.M)
-value = match.group(1) if match else ""
-print(value.rsplit(":", 1)[-1].rstrip("]"))
-PY
-)" valid_port port
-        read -r -p 'TLS server name/SNI [www.cloudflare.com; use your own server domain if available]: ' sni
-        sni="${sni:-www.cloudflare.com}"
-        if ! export_text="$("$MULTIUSER_HELPER" export --name "$name" --server "$server" --port "$port" --sni "$sni")"; then
-          fail 'Could not export the client files.'
-          pause
-          continue
-        fi
-        mapfile -t export_info <<< "$export_text"
-        (( ${#export_info[@]} == 4 )) || { fail 'The export helper returned incomplete file information.'; pause; continue; }
-        uri="${export_info[0]}"
-        qr_path=""
-        if ! command -v qrencode >/dev/null 2>&1; then
-          printf '%sThe JSON profiles are ready. Install qrencode to also create a QR image.%s\n' "$YELLOW" "$RESET"
-          if command -v apt-get >/dev/null 2>&1; then
-            read -r -p 'Run apt-get update and install qrencode now? (yes/no): ' confirmation
-            if [[ "$confirmation" == 'yes' ]]; then apt-get update && apt-get install -y qrencode || true; fi
-          elif command -v dnf >/dev/null 2>&1; then
-            read -r -p 'Install qrencode now? (yes/no): ' confirmation
-            if [[ "$confirmation" == 'yes' ]]; then dnf install -y qrencode || true; fi
-          elif command -v yum >/dev/null 2>&1; then
-            read -r -p 'Install qrencode now? (yes/no): ' confirmation
-            if [[ "$confirmation" == 'yes' ]]; then yum install -y qrencode || true; fi
-          elif command -v zypper >/dev/null 2>&1; then
-            read -r -p 'Install qrencode now? (yes/no): ' confirmation
-            if [[ "$confirmation" == 'yes' ]]; then zypper --non-interactive install qrencode || true; fi
-          elif command -v apk >/dev/null 2>&1; then
-            read -r -p 'Install qrencode now? (yes/no): ' confirmation
-            if [[ "$confirmation" == 'yes' ]]; then apk add qrencode || true; fi
-          fi
-        fi
-        if command -v qrencode >/dev/null 2>&1; then
-          qr_path="/root/anytls-clients/$name-anytls.png"
-          if ! qrencode -t PNG -s 6 -o "$qr_path" "$uri"; then
-            fail 'The JSON profiles were created, but QR image generation failed.'
-            qr_path=""
-          fi
-        fi
-        header
-        printf '%sClient files created%s\n\n' "$GREEN" "$RESET"
-        printf 'Android JSON: %s\niOS JSON:     %s\nWindows JSON: %s\n' \
-          "${export_info[1]}" "${export_info[2]}" "${export_info[3]}"
-        if [[ -n "$qr_path" ]]; then
-          printf 'QR image:     %s\n\n' "$qr_path"
-          printf 'Use the AnyTLS QR/link in NekoBox. The JSON DNS route applies to full sing-box configs; NekoBox imports only the outbound and its URL test uses direct DNS, so a missing-default-interface test error may remain. A failed URL test alone does not prove the proxy is down.\n\n'
-          qrencode -t ANSIUTF8 "$uri"
-        else
-          printf '\n%sNo QR image was created. Install qrencode and retry if you also need a QR code.%s\n' "$YELLOW" "$RESET"
-        fi
-        printf '\nSelect a profile to print as plain JSON for copying from this terminal:\n'
-        menu_item 1 'Show Android JSON'
-        menu_item 2 'Show iOS JSON'
-        menu_item 3 'Show Windows JSON'
-        menu_item 0 'Skip'
-        while true; do
-          read -r -p 'Select an option: ' show_choice
-          case "$show_choice" in
-            1|2|3|0) break ;;
-            *) printf '%sInvalid option.%s\n' "$YELLOW" "$RESET" ;;
-          esac
-        done
-        case "$show_choice" in
-          1) header; printf 'Android sing-box JSON — copy the JSON text below:\n\n'; cat "${export_info[1]}" ;;
-          2) header; printf 'iOS sing-box JSON — copy the JSON text below:\n\n'; cat "${export_info[2]}" ;;
-          3) header; printf 'Windows sing-box JSON — copy the JSON text below:\n\n'; cat "${export_info[3]}" ;;
-          0) ;;
-        esac
-        unset uri export_info
-        pause
-        ;;
-      5)
-        printf '\nThe upstream AnyTLS-Go server accepts only one password. sing-box supports multiple named accounts and this panel enforces expiration. The stock sing-box AnyTLS server does not enforce per-account device counts or data-volume quotas.\n'
-        printf 'Use a separate account per device to revoke access device by device.\n'
-        pause
-        ;;
-      0) return ;;
-      *) printf '%sInvalid option.%s\n' "$YELLOW" "$RESET"; sleep 1 ;;
-    esac
-  done
-}
-
 reconfigure_anytls() {
-  local current_listen current_ip current_port password encoded tmp_config confirmation
+  local current_listen current_ip current_port encoded tmp_config confirmation
   if ! unit_installed "$ANYTLS_UNIT" || [[ ! -f "$ANYTLS_CONFIG" ]]; then
     printf '%sAnyTLS server is not installed on this machine.%s\n' "$YELLOW" "$RESET"
     pause
@@ -388,36 +194,16 @@ else:
 PY
 )
 
-  if [[ "$(read_config_value ANYTLS_BACKEND "$ANYTLS_CONFIG")" == 'sing-box' ]]; then
-    header
-    printf 'Reconfigure multi-user AnyTLS server listen address. Account passwords are kept unchanged.\n\n'
-    read_valid 'Listen IP' "$current_ip" valid_ip SERVER_IP
-    read_valid 'Listen port' "$current_port" valid_port SERVER_PORT
-    if [[ "$SERVER_IP" == *:* ]]; then SERVER_LISTEN="[$SERVER_IP]:$SERVER_PORT"; else SERVER_LISTEN="$SERVER_IP:$SERVER_PORT"; fi
-    printf '\nNew listen address: %s\n' "$SERVER_LISTEN"
-    read -r -p 'Type yes to save and restart AnyTLS: ' confirmation
-    if [[ "$confirmation" != 'yes' ]]; then
-      printf 'Cancelled. No settings were changed.\n'
-      pause
-      return
-    fi
-    if "$MULTIUSER_HELPER" reconfigure --listen "$SERVER_LISTEN"; then
-      printf '%sListen address saved and service restarted.%s\n' "$GREEN" "$RESET"
-    else
-      fail 'Could not update the AnyTLS listen address.'
-    fi
+  header
+  printf 'Reconfigure AnyTLS-Go server\nThe service will restart after saving the new listen address. The current password will be kept.\n\n'
+  read_valid 'Listen IP' "$current_ip" valid_ip SERVER_IP
+  read_valid 'Listen port' "$current_port" valid_port SERVER_PORT
+  encoded="$(read_config_value ANYTLS_PASSWORD_B64 "$ANYTLS_CONFIG")"
+  if [[ -z "$encoded" ]] || ! printf '%s' "$encoded" | base64 --decode >/dev/null 2>&1; then
+    fail 'The saved AnyTLS password is missing or invalid; no settings were changed.'
     pause
     return
   fi
-
-  header
-  printf 'Reconfigure AnyTLS server\nThe service will restart after saving the new settings.\n\n'
-  read_valid 'Listen IP' "$current_ip" valid_ip SERVER_IP
-  read_valid 'Listen port' "$current_port" valid_port SERVER_PORT
-  ask_password
-  password="$REPLY"
-  encoded="$(printf '%s' "$password" | base64 | tr -d '\n')"
-  unset password REPLY
   if [[ "$SERVER_IP" == *:* ]]; then
     SERVER_LISTEN="[$SERVER_IP]:$SERVER_PORT"
   else
@@ -456,7 +242,7 @@ client_export_menu() {
     return
   fi
   if [[ "$(read_config_value ANYTLS_BACKEND "$ANYTLS_CONFIG")" == 'sing-box' ]]; then
-    fail 'The server is still using sing-box. Run the updated installer to restore AnyTLS-Go first.'
+    fail 'The server is still using sing-box. Choose Restore AnyTLS-Go single-user mode in the AnyTLS server menu first.'
     pause
     return
   fi
@@ -531,12 +317,10 @@ anytls_menu() {
     if unit_installed "$ANYTLS_UNIT"; then
       menu_item 1 'Manage service'
       if [[ "$backend" == 'sing-box' ]]; then
-        menu_item 2 'Reconfigure listen IP and port'
-        menu_item 3 'Manage accounts and client configs'
+        menu_item 2 'Restore AnyTLS-Go single-user mode'
       else
-        menu_item 2 'Reconfigure listen IP, port, and password'
-        menu_item 3 'Manage accounts and client configs'
-        menu_item 4 'Export shared-password client QR and JSON'
+        menu_item 2 'Reconfigure listen IP and port (keep password)'
+        menu_item 3 'Export AnyTLS-Go client QR and JSON'
       fi
     else
       printf '%sAnyTLS server is not installed on this machine.%s\n\n' "$YELLOW" "$RESET"
@@ -556,12 +340,22 @@ anytls_menu() {
         fi
         ;;
       2)
-        if unit_installed "$ANYTLS_UNIT"; then reconfigure_anytls; else printf '%sInvalid option.%s\n' "$YELLOW" "$RESET"; sleep 1; fi
+        if unit_installed "$ANYTLS_UNIT"; then
+          if [[ "$backend" == 'sing-box' ]]; then
+            header
+            printf '%sThis restores the single-password AnyTLS-Go server.%s\n' "$YELLOW" "$RESET"
+            printf 'The first active account password will be retained. Existing sing-box files and client exports will be backed up.\n\n'
+            "$INSTALLER_FILE" --restore-anytls-go --no-panel || true
+            pause
+          else
+            reconfigure_anytls
+          fi
+        else
+          printf '%sInvalid option.%s\n' "$YELLOW" "$RESET"
+          sleep 1
+        fi
         ;;
       3)
-        if unit_installed "$ANYTLS_UNIT"; then account_menu; else printf '%sInvalid option.%s\n' "$YELLOW" "$RESET"; sleep 1; fi
-        ;;
-      4)
         if unit_installed "$ANYTLS_UNIT" && [[ "$backend" != 'sing-box' ]]; then
           client_export_menu
         else
