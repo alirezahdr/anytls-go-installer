@@ -46,7 +46,7 @@ The wizard downloads the latest stable GOST release for Linux amd64 or arm64 fro
 
 ## Single-user server and client profiles
 
-The server runs the upstream AnyTLS-Go implementation with one shared password. A fresh installation generates a random 32-character password and prints it once so you can save it; the password is stored in the root-only server settings. Reconfiguring the listen IP or port keeps the current password. The panel exports a QR/link for NekoBox and JSON profiles for Android, iOS, and Windows sing-box clients. The profile name is `AnyTLS-Go` in the QR link and JSON outbound tag; each JSON file is named `AnyTLS-Go.json` inside its platform directory.
+The server runs the upstream AnyTLS-Go implementation with one shared password. A fresh installation generates a random 32-character password and prints it once so you can save it; the password is stored in the root-only server settings. Reconfiguring the listen IP or port also generates and saves a new random password, then shows it once. This invalidates existing client profiles, so export fresh QR/JSON profiles from option 3. The panel exports a QR/link for NekoBox and JSON profiles for Android, iOS, and Windows sing-box clients. The profile name is `AnyTLS-Go` in the QR link and JSON outbound tag; each JSON file is named `AnyTLS-Go.json` inside its platform directory.
 
 Choose the Iran server IP when GOST forwarding is configured, or the foreign server IP for a direct connection. For NekoBox, import the AnyTLS QR/link. The JSON profiles are full sing-box configurations: they enable `tls.insecure`, set ALPN to `h2` and `http/1.1`, use a device-specific uTLS fingerprint (`android`, `ios`, or `chrome` for Windows), and send DNS through the AnyTLS outbound. NekoBox imports sing-box outbound nodes without their routing rules, and its URL test uses direct DNS; therefore, its `cp.cloudflare.com` / “missing default interface” test error may remain. A failed URL test alone does not prove the AnyTLS connection failed; confirm by opening a website through the connected proxy. The default SNI is `www.cloudflare.com`; replace it with your own server domain when available. SNI does not route traffic through Cloudflare or guarantee that a connection will pass filtering. `tls.insecure` disables certificate verification and can expose the connection to interception. uTLS fingerprint imitation does not guarantee that traffic will avoid detection.
 
@@ -56,7 +56,7 @@ If a server still uses the legacy sing-box multi-user backend, choose **AnyTLS s
 
 - Show status and start, stop, restart, enable at boot, or disable at boot for the AnyTLS server and forwarding service.
 - Review or follow service logs.
-- Change the AnyTLS server listen IP and port while keeping the shared password.
+- Change the AnyTLS server listen IP and port while generating a new shared password; restore the previous settings if the service fails to start.
 - Restore legacy sing-box installations to the AnyTLS-Go single-user backend.
 - Export an AnyTLS-Go QR code and Android, iOS, and Windows sing-box JSON profiles.
 - Set up or update the direct GOST TCP forward.
@@ -158,7 +158,7 @@ GOST جریان TCP را به آدرس و پورت سرور خارج منتقل 
 
 ## ساخت پروفایل کلاینت
 
-سرور با پیاده‌سازی اصلی AnyTLS-Go و یک رمز مشترک اجرا می‌شود. نصب تازه یک رمز تصادفی ۳۲ کاراکتری می‌سازد و آن را یک‌بار برای ذخیره‌کردن نشان می‌دهد؛ رمز در تنظیمات فقط‌خواندنی برای root ذخیره می‌شود. تغییر IP شنود یا پورت، رمز فعلی را نگه می‌دارد. پنل برای NekoBox لینک و QR و برای sing-box در Android، iOS و Windows فایل JSON می‌سازد. نام پروفایل در QR و تگ outbound فایل JSON برابر `AnyTLS-Go` است و نام هر فایل `AnyTLS-Go.json` در پوشهٔ پلتفرم مربوطه خواهد بود.
+سرور با پیاده‌سازی اصلی AnyTLS-Go و یک رمز مشترک اجرا می‌شود. نصب تازه یک رمز تصادفی ۳۲ کاراکتری می‌سازد و آن را یک‌بار برای ذخیره‌کردن نشان می‌دهد؛ رمز در تنظیمات فقط‌خواندنی برای root ذخیره می‌شود. با تغییر IP شنود یا پورت، رمز تصادفی تازه‌ای هم ساخته و ذخیره می‌شود و یک‌بار نمایش داده می‌شود. پروفایل‌های قبلی پس از این تغییر کار نمی‌کنند؛ از گزینهٔ ۳، QR/JSON تازه بسازید. پنل برای NekoBox لینک و QR و برای sing-box در Android، iOS و Windows فایل JSON می‌سازد. نام پروفایل در QR و تگ outbound فایل JSON برابر `AnyTLS-Go` است و نام هر فایل `AnyTLS-Go.json` در پوشهٔ پلتفرم مربوطه خواهد بود.
 
 برای اتصال مستقیم IP سرور خارج را وارد کنید؛ اگر فوروارد GOST روی ایران دارید، IP عمومی ایران را وارد کنید. برای NekoBox، QR یا لینک AnyTLS را وارد کنید. فایل‌های JSON پیکربندی کامل sing-box هستند: `tls.insecure`، ALPN برابر `h2` و `http/1.1`، fingerprint متناسب با دستگاه (`android`، `ios` یا `chrome` برای Windows) و DNS از مسیر AnyTLS را تنظیم می‌کنند. NekoBox از JSONهای sing-box فقط outbound را وارد می‌کند و قوانین مسیریابی را نادیده می‌گیرد؛ تست URL آن نیز DNS مستقیم دارد. به همین دلیل ممکن است خطای `cp.cloudflare.com` یا `missing default interface` در تست باقی بماند. خطای تست به‌تنهایی ثابت نمی‌کند اتصال AnyTLS برقرار نشده؛ پس از اتصال، یک سایت را در مرورگر باز کنید. SNI پیش‌فرض `www.cloudflare.com` است؛ در صورت داشتن دامنهٔ خودتان آن را جایگزین کنید. SNI اتصال را از مسیر Cloudflare عبور نمی‌دهد و عبور از فیلترینگ را تضمین نمی‌کند. گزینهٔ `tls.insecure` بررسی گواهی را غیرفعال می‌کند و می‌تواند اتصال را در برابر رهگیری آسیب‌پذیر کند. تقلید uTLS نیز تضمینی برای شناسایی‌نشدن ترافیک نیست.
 
@@ -170,7 +170,7 @@ GOST جریان TCP را به آدرس و پورت سرور خارج منتقل 
 
 - نمایش وضعیت و اجرای start، stop، restart، enable هنگام بوت یا disable برای سرور AnyTLS و سرویس فوروارد.
 - مشاهده یا دنبال‌کردن گزارش سرویس‌ها.
-- تغییر IP شنود و پورت با حفظ رمز مشترک.
+- تغییر IP شنود و پورت همراه با ساخت رمز مشترک تازه؛ اگر سرویس اجرا نشود تنظیم قبلی بازگردانده می‌شود.
 - بازگرداندن نصب‌های قدیمی sing-box به حالت تک‌کاربرهٔ AnyTLS-Go.
 - ساخت QR برای AnyTLS-Go و فایل JSON sing-box برای Android، iOS و Windows.
 - راه‌اندازی یا تنظیم دوبارهٔ فوروارد مستقیم TCP با GOST.

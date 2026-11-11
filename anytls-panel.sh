@@ -175,7 +175,7 @@ read_config_value() {
 }
 
 reconfigure_anytls() {
-  local current_listen current_ip current_port encoded tmp_config confirmation
+  local current_listen current_ip current_port encoded new_password tmp_config backup_config confirmation
   if ! unit_installed "$ANYTLS_UNIT" || [[ ! -f "$ANYTLS_CONFIG" ]]; then
     printf '%sAnyTLS server is not installed on this machine.%s\n' "$YELLOW" "$RESET"
     pause
@@ -195,15 +195,9 @@ PY
 )
 
   header
-  printf 'Reconfigure AnyTLS-Go server\nThe service will restart after saving the new listen address. The current password will be kept.\n\n'
+  printf 'Reconfigure AnyTLS-Go server\nA new random password will be generated and saved with the listen address. Existing client profiles will stop working.\n\n'
   read_valid 'Listen IP' "$current_ip" valid_ip SERVER_IP
   read_valid 'Listen port' "$current_port" valid_port SERVER_PORT
-  encoded="$(read_config_value ANYTLS_PASSWORD_B64 "$ANYTLS_CONFIG")"
-  if [[ -z "$encoded" ]] || ! printf '%s' "$encoded" | base64 --decode >/dev/null 2>&1; then
-    fail 'The saved AnyTLS password is missing or invalid; no settings were changed.'
-    pause
-    return
-  fi
   if [[ "$SERVER_IP" == *:* ]]; then
     SERVER_LISTEN="[$SERVER_IP]:$SERVER_PORT"
   else
@@ -211,22 +205,60 @@ PY
   fi
 
   printf '\nListen address: %s\n' "$SERVER_LISTEN"
-  read -r -p 'Type yes to save and restart AnyTLS: ' confirmation
+  read -r -p 'Type yes to save, generate a new password, and restart AnyTLS: ' confirmation
   if [[ "$confirmation" != 'yes' ]]; then
     printf 'Cancelled. No settings were changed.\n'
     pause
     return
   fi
 
+  new_password="$(python3 -c 'import secrets; print(secrets.token_hex(16))')" || {
+    fail 'Could not generate a new password; no settings were changed.'
+    pause
+    return
+  }
+  if [[ ! "$new_password" =~ ^[0-9a-f]{32}$ ]]; then
+    unset new_password
+    fail 'Password generation returned an invalid value; no settings were changed.'
+    pause
+    return
+  fi
+  encoded="$(printf '%s' "$new_password" | base64 | tr -d '\n')"
   tmp_config="$TMP_DIR/anytls.env"
-  printf 'ANYTLS_LISTEN=%s\nANYTLS_PASSWORD_B64=%s\n' "$SERVER_LISTEN" "$encoded" > "$tmp_config"
-  install -o root -g root -m 0600 "$tmp_config" "$ANYTLS_CONFIG.new"
-  mv -f -- "$ANYTLS_CONFIG.new" "$ANYTLS_CONFIG"
+  backup_config="$TMP_DIR/anytls.env.previous"
+  if ! cp -- "$ANYTLS_CONFIG" "$backup_config"; then
+    unset new_password encoded
+    fail 'Could not back up the current settings; no settings were changed.'
+    pause
+    return
+  fi
+  if ! printf 'ANYTLS_LISTEN=%s\nANYTLS_PASSWORD_B64=%s\n' "$SERVER_LISTEN" "$encoded" > "$tmp_config" ||
+    ! install -o root -g root -m 0600 "$tmp_config" "$ANYTLS_CONFIG.new" ||
+    ! mv -f -- "$ANYTLS_CONFIG.new" "$ANYTLS_CONFIG"; then
+    rm -f -- "$ANYTLS_CONFIG.new"
+    unset new_password encoded
+    fail 'Could not save the new settings; the existing settings were left unchanged.'
+    pause
+    return
+  fi
   unset encoded
-  if systemctl restart "$ANYTLS_UNIT"; then
+  if systemctl restart "$ANYTLS_UNIT" && systemctl is-active --quiet "$ANYTLS_UNIT"; then
     printf '%sAnyTLS settings saved and service restarted.%s\n' "$GREEN" "$RESET"
+    printf '\nNew AnyTLS password (save it now): %s\n' "$new_password"
+    printf 'Old client profiles no longer work. Export fresh QR/JSON profiles from option 3.\n'
+    unset new_password
   else
-    fail 'Settings were saved, but AnyTLS did not restart. Review the service logs.'
+    unset new_password
+    fail 'AnyTLS did not start with the new settings. Restoring the previous settings.'
+    if install -o root -g root -m 0600 "$backup_config" "$ANYTLS_CONFIG.rollback" && mv -f -- "$ANYTLS_CONFIG.rollback" "$ANYTLS_CONFIG"; then
+      if systemctl restart "$ANYTLS_UNIT" && systemctl is-active --quiet "$ANYTLS_UNIT"; then
+        printf '%sPrevious AnyTLS settings were restored and the service is active.%s\n' "$GREEN" "$RESET"
+      else
+        fail 'Previous settings were restored, but the service still did not start.'
+      fi
+    else
+      fail 'Could not restore the previous settings automatically.'
+    fi
     systemctl status "$ANYTLS_UNIT" --no-pager || true
     journalctl -u "$ANYTLS_UNIT" -n 30 --no-pager || true
   fi
@@ -319,7 +351,7 @@ anytls_menu() {
       if [[ "$backend" == 'sing-box' ]]; then
         menu_item 2 'Restore AnyTLS-Go single-user mode'
       else
-        menu_item 2 'Reconfigure listen IP and port (keep password)'
+        menu_item 2 'Reconfigure IP/port and generate a new password'
         menu_item 3 'Export AnyTLS-Go client QR and JSON'
       fi
     else
