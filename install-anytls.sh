@@ -5,9 +5,11 @@ export LC_ALL=C
 
 readonly REPO_API='https://api.github.com/repos/anytls/anytls-go/releases/latest'
 readonly PANEL_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/anytls-panel.sh'
+readonly USERS_HELPER_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/anytls-users.py'
 readonly CLIENT_HELPER_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/anytls-client-config.py'
 readonly INSTALLER_URL='https://raw.githubusercontent.com/alirezahdr/anytls-go-installer/main/install-anytls.sh'
 readonly PANEL_FILE='/usr/local/bin/anytls-panel'
+readonly USERS_HELPER_FILE='/usr/local/bin/anytls-users.py'
 readonly CLIENT_HELPER_FILE='/usr/local/bin/anytls-client-config.py'
 readonly INSTALLER_FILE='/usr/local/libexec/anytls-installer'
 readonly SERVICE_NAME='anytls'
@@ -34,13 +36,16 @@ die() {
 
 INSTALL_ANYTLS=0
 OPEN_PANEL=1
+RESTORE_ANYTLS_GO=0
 for argument in "$@"; do
   case "$argument" in
     --install-anytls) INSTALL_ANYTLS=1 ;;
     --no-panel) OPEN_PANEL=0 ;;
+    --restore-anytls-go) RESTORE_ANYTLS_GO=1 ;;
     *) die "Unknown argument: $argument" ;;
   esac
 done
+if (( RESTORE_ANYTLS_GO )); then INSTALL_ANYTLS=1; fi
 if (( ! OPEN_PANEL && ! INSTALL_ANYTLS )); then
   die '--no-panel can only be used together with --install-anytls.'
 fi
@@ -82,6 +87,9 @@ if (( OPEN_PANEL )); then
     "$PANEL_URL" --output "$TMP_DIR/anytls-panel"
   install -o root -g root -m 0755 "$TMP_DIR/anytls-panel" "$PANEL_FILE"
   curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
+    "$USERS_HELPER_URL" --output "$TMP_DIR/anytls-users.py"
+  install -o root -g root -m 0755 "$TMP_DIR/anytls-users.py" "$USERS_HELPER_FILE"
+  curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
     "$CLIENT_HELPER_URL" --output "$TMP_DIR/anytls-client-config.py"
   install -o root -g root -m 0755 "$TMP_DIR/anytls-client-config.py" "$CLIENT_HELPER_FILE"
   curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
@@ -114,11 +122,8 @@ if [[ -r "$CONFIG_FILE" ]] && grep -q '^ANYTLS_BACKEND=sing-box$' "$CONFIG_FILE"
   SINGBOX_BACKEND=1
 fi
 RESTORE_BACKUP_DIR=''
-if (( ! SINGBOX_BACKEND )) && [[ -e /usr/local/bin/anytls-users.py ]]; then
-  rm -f -- /usr/local/bin/anytls-users.py
-fi
 
-if (( ! INSTALL_ANYTLS && ! SINGBOX_BACKEND )); then
+if (( ! INSTALL_ANYTLS && ! RESTORE_ANYTLS_GO )); then
   if systemctl cat "$SERVICE_NAME" >/dev/null 2>&1; then
     ensure_qrencode || die 'Could not install qrencode. Install it with your Linux package manager, then reopen the panel.'
   fi
@@ -126,11 +131,20 @@ if (( ! INSTALL_ANYTLS && ! SINGBOX_BACKEND )); then
   exit 0
 fi
 
+if (( SINGBOX_BACKEND && ! RESTORE_ANYTLS_GO )); then
+  printf '\nThe existing multi-user sing-box backend is preserved. Use the panel to manage it.\n'
+  if (( OPEN_PANEL )); then "$PANEL_FILE"; fi
+  exit 0
+fi
+if (( RESTORE_ANYTLS_GO && ! SINGBOX_BACKEND )); then
+  die 'The explicit restore option is only for a server currently using the sing-box multi-user backend.'
+fi
+
 ensure_qrencode || die 'Could not install qrencode. AnyTLS installation stopped; install qrencode with your Linux package manager and retry.'
 
 RESTORE_SINGBOX=0
 PASSWORD_B64=''
-if (( SINGBOX_BACKEND )); then
+if (( RESTORE_ANYTLS_GO )); then
   printf '\nThis installer will restore the original single-password AnyTLS-Go backend. It will use the first active account password and keep the existing sing-box files and client exports as backups.\n'
   mapfile -t RESTORE_INFO < <(python3 - "$CONFIG_FILE" /etc/anytls/users.json <<'PY'
 import base64
@@ -470,7 +484,6 @@ fi
 printf '\nAnyTLS-Go %s installation is complete.\n' "$VERSION"
 printf 'Listen address: %s\n' "$LISTEN"
 if (( RESTORE_SINGBOX )); then
-  rm -f -- /usr/local/bin/anytls-users.py
   printf 'The password from account %s is now the shared AnyTLS-Go password. Existing sing-box data and client exports were retained.\n' "$RESTORE_ACCOUNT"
   printf 'Backup: %s\n' "$RESTORE_BACKUP_DIR"
 fi
