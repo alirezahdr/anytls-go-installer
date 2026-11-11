@@ -361,6 +361,7 @@ if (( RESTORE_SINGBOX )); then
   [[ -e "$SERVICE_FILE" ]] && cp -a "$SERVICE_FILE" "$RESTORE_BACKUP_DIR/anytls.service"
   [[ -e /usr/local/bin/anytls-users.py ]] && cp -a /usr/local/bin/anytls-users.py "$RESTORE_BACKUP_DIR/anytls-users.py"
   [[ -e /usr/local/bin/anytls-sing-box ]] && cp -a /usr/local/bin/anytls-sing-box "$RESTORE_BACKUP_DIR/anytls-sing-box"
+  [[ -d /root/anytls-clients ]] && cp -a /root/anytls-clients "$RESTORE_BACKUP_DIR/anytls-clients"
   if systemctl is-enabled --quiet anytls-users-expiry.timer 2>/dev/null; then RESTORE_EXPIRY_TIMER_ENABLED=1; fi
   systemctl disable --now anytls-users-expiry.timer >/dev/null 2>&1 || true
 fi
