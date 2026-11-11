@@ -673,14 +673,14 @@ PY
 }
 
 write_reverse_agent_config() {
-  local output_file="$1" relay_host="$2" relay_port="$3" entry_port="$4" target_port="$5" relay_user="$6" relay_password="$7"
-  python3 - "$output_file" "$relay_host" "$relay_port" "$entry_port" "$target_port" "$relay_user" "$relay_password" <<'PY'
+  local output_file="$1" relay_host="$2" relay_port="$3" entry_port="$4" target_host="$5" target_port="$6" relay_user="$7" relay_password="$8"
+  python3 - "$output_file" "$relay_host" "$relay_port" "$entry_port" "$target_host" "$target_port" "$relay_user" "$relay_password" <<'PY'
 import ipaddress
 import json
 import re
 import sys
 
-path, relay_host, relay_port, entry_port, target_port, username, password = sys.argv[1:]
+path, relay_host, relay_port, entry_port, target_host, target_port, username, password = sys.argv[1:]
 try:
     ipaddress.ip_address(relay_host)
 except ValueError:
@@ -688,6 +688,13 @@ except ValueError:
     if len(relay_host) > 253 or not re.fullmatch(label + r"(?:\." + label + r")*\.?", relay_host):
         raise SystemExit("Invalid relay host")
 relay_addr_host = f"[{relay_host}]" if ":" in relay_host else relay_host
+try:
+    ipaddress.ip_address(target_host)
+except ValueError:
+    label = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    if len(target_host) > 253 or not re.fullmatch(label + r"(?:\." + label + r")*\.?", target_host):
+        raise SystemExit("Invalid target host")
+target_addr_host = f"[{target_host}]" if ":" in target_host else target_host
 config = {
     "services": [{
         "name": "anytls-reverse-agent",
@@ -695,7 +702,7 @@ config = {
         "handler": {"type": "rtcp"},
         "listener": {"type": "rtcp", "chain": "chain-0"},
         "forwarder": {
-            "nodes": [{"name": "local-anytls", "addr": f"127.0.0.1:{target_port}"}]
+            "nodes": [{"name": "anytls-backend", "addr": f"{target_addr_host}:{target_port}"}]
         },
     }],
     "chains": [{
@@ -703,7 +710,7 @@ config = {
         "hops": [{
             "name": "hop-0",
             "nodes": [{
-                "name": "iran-relay",
+                "name": "relay-server",
                 "addr": f"{relay_addr_host}:{relay_port}",
                 "connector": {
                     "type": "relay",
@@ -780,8 +787,8 @@ UNIT
       printf 'RELAY_LISTEN=%s\nRELAY_PORT=%s\n' "$RELAY_BIND" "$RELAY_PORT" >> "$env_tmp"
       ;;
     reverse-agent)
-      printf 'RELAY_HOST=%s\nRELAY_PORT=%s\nENTRY_PORT=%s\nTARGET_PORT=%s\n' \
-        "$RELAY_HOST" "$RELAY_PORT" "$ENTRY_PORT" "$TARGET_PORT" >> "$env_tmp"
+      printf 'RELAY_HOST=%s\nRELAY_PORT=%s\nENTRY_PORT=%s\nTARGET_HOST=%s\nTARGET_PORT=%s\n' \
+        "$RELAY_HOST" "$RELAY_PORT" "$ENTRY_PORT" "$TARGET_HOST" "$TARGET_PORT" >> "$env_tmp"
       ;;
   esac
   install -o root -g root -m 0600 "$env_tmp" "$TUNNEL_CONFIG.new"
@@ -804,13 +811,13 @@ UNIT
 setup_reverse_relay() {
   local confirmation work_dir relay_user relay_password
   header
-  printf '%sReverse GOST relay setup — Iran server%s\n\n' "$GREEN" "$RESET"
-  printf 'This configures the public Iran relay endpoint. The foreign server will connect outbound to it and create the AnyTLS entry port on Iran.\n'
-  printf 'The relay uses TLS and a generated credential. Its self-signed TLS certificate is encrypted but not verified by the foreign agent.\n\n'
+  printf '%sReverse GOST Relay setup — client-facing server%s\n\n' "$GREEN" "$RESET"
+  printf 'Run this role on the server whose public IP clients should use. The AnyTLS-Go backend can run on another host; its Agent will create the client entry port here.\n'
+  printf 'The Relay uses TLS and a generated credential. The Agent encrypts the connection but does not verify GOST’s automatically generated certificate.\n\n'
   read_valid 'Relay listen IP (0.0.0.0 accepts IPv4 connections on all interfaces)' '0.0.0.0' valid_ip RELAY_BIND
-  read_valid 'Relay control port (open this only to the foreign server IP when possible)' '8444' valid_port RELAY_PORT
-  printf '\nThe foreign server agent will separately set the Iran entry port to match the AnyTLS port.\n'
-  read -r -p 'Type yes to install and enable the Iran relay service: ' confirmation
+  read_valid 'Relay control port (allow this from the Agent server IP)' '8444' valid_port RELAY_PORT
+  printf '\nThe Agent setup will separately choose the public client entry port on this Relay server.\n'
+  read -r -p 'Type yes to install and enable the Relay service on this server: ' confirmation
   if [[ "$confirmation" != 'yes' ]]; then
     printf 'Cancelled. No GOST service was changed.\n'
     pause
@@ -827,20 +834,19 @@ setup_reverse_relay() {
     pause
     return 1
   }
-  install_reverse_service "$work_dir" reverse-relay 'Reverse GOST relay server on Iran' || {
+  install_reverse_service "$work_dir" reverse-relay 'Reverse GOST Relay server' || {
     unset relay_password
     pause
     return 1
   }
 
   header
-  printf '%sIran reverse relay is active.%s\n\n' "$GREEN" "$RESET"
-  printf 'Relay address:  use the Iran server public IP and port %s\n' "$RELAY_PORT"
+  printf '%sReverse GOST Relay is active on this server.%s\n\n' "$GREEN" "$RESET"
+  printf 'Relay address:  use this server’s public IP and port %s\n' "$RELAY_PORT"
   printf 'Relay username: %s\n' "$relay_user"
   printf 'Relay password: %s\n\n' "$relay_password"
-  printf 'Copy these credentials. On the foreign AnyTLS server, select GOST forwarding → reverse setup → Abroad agent.\n'
-  printf 'Open TCP %s on Iran for the foreign server (restrict the source IP if your firewall allows it).\n' "$RELAY_PORT"
-  printf 'The AnyTLS client entry port is opened separately when the abroad agent connects.\n'
+  printf 'Copy these credentials. On the server running AnyTLS-Go, choose GOST forwarding → reverse setup → Configure reverse Agent.\n'
+  printf 'Allow TCP %s from the Agent server on this Relay host. Open the client entry port separately for client traffic.\n' "$RELAY_PORT"
   unset relay_password
   pause
 }
@@ -848,14 +854,19 @@ setup_reverse_relay() {
 setup_reverse_agent() {
   local confirmation relay_user relay_password work_dir
   header
-  printf '%sReverse GOST agent setup — foreign AnyTLS server%s\n\n' "$GREEN" "$RESET"
-  printf 'Run this on the foreign server that hosts AnyTLS. The agent opens an outbound TLS connection to Iran and forwards the Iran entry port to local AnyTLS.\n\n'
-  read_valid 'Iran relay server public IP or DNS name' '' valid_host RELAY_HOST
-  read_valid 'Iran relay control port' '8444' valid_port RELAY_PORT
-  read_valid 'AnyTLS entry port to expose on Iran' '8443' valid_port ENTRY_PORT
-  read_valid 'Local AnyTLS listening port on this server' "$ENTRY_PORT" valid_port TARGET_PORT
+  printf '%sReverse GOST Agent setup — AnyTLS backend server%s\n\n' "$GREEN" "$RESET"
+  printf 'Run this role on the server that runs AnyTLS-Go. The Agent connects outbound to the Relay and forwards its public client entry port to the AnyTLS backend.\n\n'
+  read_valid 'Relay server public IP or DNS name' '' valid_host RELAY_HOST
+  read_valid 'Relay control port' '8444' valid_port RELAY_PORT
+  read_valid 'Client entry port to expose on the Relay server' '8443' valid_port ENTRY_PORT
+  while [[ "$ENTRY_PORT" == "$RELAY_PORT" ]]; do
+    printf '%sThe client entry port must differ from the Relay control port.%s\n' "$YELLOW" "$RESET"
+    read_valid 'Choose a different client entry port' '8443' valid_port ENTRY_PORT
+  done
+  read_valid 'AnyTLS backend IP or DNS name' '127.0.0.1' valid_host TARGET_HOST
+  read_valid 'AnyTLS backend listening port' "$ENTRY_PORT" valid_port TARGET_PORT
   while true; do
-    read -r -p 'Relay username (from the Iran relay setup): ' relay_user
+    read -r -p 'Relay username (from the Relay setup): ' relay_user
     if [[ "$relay_user" =~ ^[A-Za-z0-9._-]{1,64}$ ]]; then break; fi
     printf '%sUse 1–64 letters, numbers, dots, underscores, or hyphens.%s\n' "$YELLOW" "$RESET"
   done
@@ -865,12 +876,12 @@ setup_reverse_agent() {
     if [[ "$relay_password" =~ ^[A-Za-z0-9._-]{20,128}$ ]]; then break; fi
     printf '%sPassword must contain 20–128 letters, numbers, dots, underscores, or hyphens.%s\n' "$YELLOW" "$RESET"
   done
-  printf '\nIran relay:           %s:%s\n' "$RELAY_HOST" "$RELAY_PORT"
-  printf 'Iran AnyTLS entry:    port %s\n' "$ENTRY_PORT"
-  printf 'Foreign local target:  127.0.0.1:%s\n' "$TARGET_PORT"
-  printf 'Client profile:       use the Iran public IP and entry port %s; keep the AnyTLS password\n\n' "$ENTRY_PORT"
-  printf 'TLS encrypts the relay connection; the agent does not verify GOST’s auto-generated certificate.\n'
-  printf 'Open TCP %s on Iran to AnyTLS clients and TCP %s from this server to the Iran relay.\n' "$ENTRY_PORT" "$RELAY_PORT"
+  printf '\nRelay server:         %s:%s\n' "$RELAY_HOST" "$RELAY_PORT"
+  printf 'Client entry port:    %s on the Relay server\n' "$ENTRY_PORT"
+  printf 'AnyTLS backend:       %s:%s\n' "$TARGET_HOST" "$TARGET_PORT"
+  printf 'Client profile:       use the Relay server public IP and entry port %s; keep the AnyTLS password\n\n' "$ENTRY_PORT"
+  printf 'TLS encrypts the Relay connection; the Agent does not verify GOST’s auto-generated certificate.\n'
+  printf 'Open TCP %s on the Relay server to client networks and TCP %s from this Agent host to the Relay.\n' "$ENTRY_PORT" "$RELAY_PORT"
   read -r -p 'Type yes to install and enable the reverse agent: ' confirmation
   if [[ "$confirmation" != 'yes' ]]; then
     unset relay_password
@@ -881,23 +892,23 @@ setup_reverse_agent() {
 
   work_dir="$(mktemp -d -p "$TMP_DIR" reverse-agent.XXXXXXXX)"
   chmod 0700 "$work_dir"
-  write_reverse_agent_config "$work_dir/gost.json" "$RELAY_HOST" "$RELAY_PORT" "$ENTRY_PORT" "$TARGET_PORT" "$relay_user" "$relay_password" || {
+  write_reverse_agent_config "$work_dir/gost.json" "$RELAY_HOST" "$RELAY_PORT" "$ENTRY_PORT" "$TARGET_HOST" "$TARGET_PORT" "$relay_user" "$relay_password" || {
     unset relay_password
     fail 'Could not create the GOST reverse agent configuration.'
     pause
     return 1
   }
   unset relay_password
-  install_reverse_service "$work_dir" reverse-agent 'Reverse GOST agent on the foreign AnyTLS server' || {
+  install_reverse_service "$work_dir" reverse-agent 'Reverse GOST Agent on the AnyTLS backend server' || {
     pause
     return 1
   }
 
   header
   printf '%sReverse GOST agent is active.%s\n\n' "$GREEN" "$RESET"
-  printf 'Client server address: Iran server public IP\nClient port:           %s\n' "$ENTRY_PORT"
+  printf 'Client server address: Relay server public IP\nClient port:           %s\n' "$ENTRY_PORT"
   printf 'Client AnyTLS password: unchanged\n\n'
-  printf 'Allow inbound TCP %s on the Iran server and provider firewall.\n' "$ENTRY_PORT"
+  printf 'Allow inbound TCP %s on the Relay server and provider firewall.\n' "$ENTRY_PORT"
   printf 'Manage this host’s agent with: sudo systemctl status %s\n' "$TUNNEL_UNIT"
   pause
 }
@@ -906,10 +917,10 @@ setup_reverse() {
   local choice
   header
   printf '%sReverse TCP tunnel setup with GOST%s\n\n' "$GREEN" "$RESET"
-  printf 'Configure each role on its own server. The Iran relay and foreign agent both use the anytls-tunnel systemd service name on their respective hosts.\n'
+  printf 'Configure the Relay on the client-facing server, then configure the Agent on the server running AnyTLS-Go. Both roles use the anytls-tunnel service name on their respective hosts.\n'
   printf 'Setting up a role replaces the existing GOST mode on that server.\n\n'
-  menu_item 1 'Configure Iran relay server'
-  menu_item 2 'Configure foreign AnyTLS server agent'
+  menu_item 1 'Configure Relay server (client entry point)'
+  menu_item 2 'Configure reverse Agent (AnyTLS backend)'
   menu_item 0 'Back'
   read -r -p 'Select a role: ' choice
   case "$choice" in
@@ -927,8 +938,8 @@ tunnel_menu() {
     printf 'GOST forwarding management\n\n'
     mode="$(read_config_value TUNNEL_MODE "$TUNNEL_CONFIG")"
     case "$mode" in
-      reverse-relay) printf 'Configured role: Iran reverse relay server\n' ;;
-      reverse-agent) printf 'Configured role: foreign reverse agent\n' ;;
+      reverse-relay) printf 'Configured role: reverse GOST Relay (client entry point)\n' ;;
+      reverse-agent) printf 'Configured role: reverse GOST Agent (AnyTLS backend)\n' ;;
       *)
         if [[ -r "$TUNNEL_CONFIG" ]] && grep -q '^LOCAL_BIND=' "$TUNNEL_CONFIG"; then
           printf 'Configured mode: direct TCP forwarding\n'

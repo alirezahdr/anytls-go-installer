@@ -44,27 +44,29 @@ GOST relays the TCP stream to the configured foreign address and port; it does n
 
 The wizard downloads the latest stable GOST release for Linux amd64 or arm64 from the official project and checks its SHA-256 digest before installing it. Forwarding runs as a systemd service, starts at boot, and restarts automatically after a failure. The service unit keeps the name anytls-tunnel for compatibility with the existing panel commands.
 
-## Iran-to-abroad reverse GOST tunnel
+## Reverse GOST tunnel
 
-Use this mode when the foreign AnyTLS server can initiate a connection to Iran, while direct Iran-to-abroad forwarding is unavailable. GOST's Relay BIND function lets the foreign agent create the AnyTLS entry port on the Iran server. The panel uses the Relay protocol over TLS and a generated username/password. See the [GOST Relay documentation](https://gost.run/en/tutorials/protocols/relay/) for the protocol's remote port forwarding mode.
+Use this mode when the AnyTLS-Go backend should stay on one server while clients connect to a different, public-facing server. Only the backend host needs AnyTLS-Go. GOST runs on both hosts: the Relay listens on the client-facing host, and the Agent makes an outbound connection from the backend host and forwards the Relay's client entry port to AnyTLS-Go. GOST's Relay BIND function provides the remote entry port. The panel uses Relay over TLS with a generated username and password. See the [GOST Relay documentation](https://gost.run/en/tutorials/protocols/relay/) for remote port forwarding.
+
+For example, when AnyTLS-Go runs on Iran and clients should connect to Germany:
 
 ~~~text
-AnyTLS client → Iran server IP:entry port → TLS Relay on Iran → outbound GOST agent abroad → 127.0.0.1:AnyTLS port
+AnyTLS client → Germany public IP:entry port → GOST Relay on Germany → outbound GOST Agent on Iran → 127.0.0.1:AnyTLS-Go port
 ~~~
 
 Configure the two roles separately:
 
-1. On the Iran server, open **GOST forwarding management → Set up or update reverse GOST tunnel → Configure Iran relay server**. Save the generated relay username and password. Allow the relay control TCP port (default `8444`) from the foreign server's public IP in the Iran and provider firewalls.
-2. On the foreign server that runs AnyTLS, open **GOST forwarding management → Set up or update reverse GOST tunnel → Configure foreign AnyTLS server agent**. Enter the Iran relay address, the control port and credentials, the Iran client entry port, and the local AnyTLS port. The entry and AnyTLS ports default to `8443`.
-3. Allow the Iran entry TCP port from client networks in the Iran and provider firewalls. In the AnyTLS client profile, use the Iran server public IP and entry port; keep the AnyTLS password unchanged.
+1. On the client-facing host (Germany in this example), choose **GOST forwarding management → Set up or update reverse GOST tunnel → Configure Relay server (client entry point)**. Save the generated Relay username and password. Allow the Relay control TCP port (default `8444`) from the Agent host's public IP in the Relay host and provider firewalls.
+2. On the host running AnyTLS-Go (Iran in this example), choose **GOST forwarding management → Set up or update reverse GOST tunnel → Configure reverse Agent (AnyTLS backend)**. Enter the Relay host address, control port and credentials, client entry port on the Relay host, and AnyTLS-Go backend address and port. Entry and backend ports default to `8443`; the backend address defaults to `127.0.0.1`.
+3. Allow the client entry TCP port from client networks on the Relay host and provider firewall. In the AnyTLS client profile, use the Relay host public IP and entry port; keep the AnyTLS-Go password unchanged.
 
-The foreign agent initiates the connection to Iran, so the Iran firewall must allow its control port. Restrict that port to the foreign server IP when possible. The relay credentials and GOST configuration are stored in a restricted file. TLS encrypts the relay data, but the agent does not verify GOST's automatically generated certificate; source-IP firewall restrictions are recommended. Setting up either GOST mode replaces the `anytls-tunnel` configuration on that host, so configure the Iran relay and foreign agent on their respective servers.
+The Agent initiates the connection to the Relay, so the Relay firewall must allow its control port from the Agent host. Restrict that port to the Agent host IP when possible. The Relay credentials and GOST configuration are stored in a restricted file. TLS encrypts the Relay data, but the Agent does not verify GOST's automatically generated certificate; source-IP firewall restrictions are recommended. Setting up either GOST mode replaces the `anytls-tunnel` configuration on that host, so configure the Relay and Agent on their respective servers.
 
 ## Single-user server and client profiles
 
 The server runs the upstream AnyTLS-Go implementation with one shared password. A fresh installation generates a random 32-character password and prints it once so you can save it; the password is stored in the root-only server settings. Reconfiguring the listen IP or port also generates and saves a new random password, then shows it once. This invalidates existing client profiles, so export fresh QR/JSON profiles from option 3. The panel exports a QR/link for NekoBox and JSON profiles for Android, iOS, and Windows sing-box clients. The profile name is `AnyTLS-Go` in the QR link and JSON outbound tag; each JSON file is named `AnyTLS-Go.json` inside its platform directory.
 
-Choose the Iran server IP when GOST forwarding is configured, or the foreign server IP for a direct connection. For NekoBox, import the AnyTLS QR/link. The JSON profiles are full sing-box configurations: they enable `tls.insecure`, set ALPN to `h2` and `http/1.1`, use a device-specific uTLS fingerprint (`android`, `ios`, or `chrome` for Windows), and send DNS through the AnyTLS outbound. NekoBox imports sing-box outbound nodes without their routing rules, and its URL test uses direct DNS; therefore, its `cp.cloudflare.com` / “missing default interface” test error may remain. A failed URL test alone does not prove the AnyTLS connection failed; confirm by opening a website through the connected proxy. The default SNI is `www.cloudflare.com`; replace it with your own server domain when available. SNI does not route traffic through Cloudflare or guarantee that a connection will pass filtering. `tls.insecure` disables certificate verification and can expose the connection to interception. uTLS fingerprint imitation does not guarantee that traffic will avoid detection.
+For a direct connection, use the AnyTLS-Go server IP. With direct Iran-to-abroad GOST forwarding, use the Iran server IP. With reverse GOST, use the Relay host public IP (Germany in the example above). For NekoBox, import the AnyTLS QR/link. The JSON profiles are full sing-box configurations: they enable `tls.insecure`, set ALPN to `h2` and `http/1.1`, use a device-specific uTLS fingerprint (`android`, `ios`, or `chrome` for Windows), and send DNS through the AnyTLS outbound. NekoBox imports sing-box outbound nodes without their routing rules, and its URL test uses direct DNS; therefore, its `cp.cloudflare.com` / “missing default interface” test error may remain. A failed URL test alone does not prove the AnyTLS connection failed; confirm by opening a website through the connected proxy. The default SNI is `www.cloudflare.com`; replace it with your own server domain when available. SNI does not route traffic through Cloudflare or guarantee that a connection will pass filtering. `tls.insecure` disables certificate verification and can expose the connection to interception. uTLS fingerprint imitation does not guarantee that traffic will avoid detection.
 
 If a server still uses the legacy sing-box multi-user backend, choose **AnyTLS server management → Restore AnyTLS-Go single-user mode**. The first active account password becomes the shared AnyTLS-Go password. Existing sing-box settings and client exports are saved in a backup directory.
 
@@ -124,7 +126,7 @@ sudo systemctl restart anytls
 - Linux with systemd and root or sudo access.
 - curl, Python 3, and standard system utilities.
 - The installer installs qrencode automatically when installing or opening the AnyTLS panel, so QR export is ready to use. Supported package managers are apt, dnf, yum, zypper, and apk.
-- Direct and reverse GOST forwarding support Linux amd64 and arm64. Reverse mode requires the foreign server to reach the Iran relay control port.
+- Direct and reverse GOST forwarding support Linux amd64 and arm64. Reverse mode requires the Agent host to reach the Relay control port.
 - The server installer supports Linux amd64 and arm64.
 - Direct forwarding listens on the IP selected in its wizard. Use **0.0.0.0** to accept connections on all IPv4 interfaces; restrict access through firewalls as needed.
 - The listen port must be available on the Iran server.
@@ -172,27 +174,29 @@ sudo anytls-panel
 
 GOST جریان TCP را به آدرس و پورت سرور خارج منتقل می‌کند و به رمز AnyTLS نیاز ندارد. سرور AnyTLS باید از قبل روی سرور خارج فعال باشد و سرور ایران بتواند به آن دسترسی داشته باشد. پورت ورودی TCP را در فایروال سرور ایران و فایروال ارائه‌دهنده باز کنید و دسترسی خروجی سرور ایران به مقصد AnyTLS خارج را نیز مجاز کنید.
 
-## تونل معکوس GOST از خارج به ایران
+## تونل معکوس GOST
 
-این حالت را وقتی انتخاب کنید که سرور خارج بتواند به ایران اتصال خروجی بزند اما فوروارد مستقیم ایران به خارج برقرار نمی‌شود. قابلیت Relay BIND در GOST به Agent روی سرور خارج اجازه می‌دهد پورت ورودی AnyTLS را روی سرور ایران ایجاد کند. پنل Relay را روی TLS و با نام‌کاربری و رمز تصادفی اجرا می‌کند. جزئیات این روش در [مستند رسمی Relay در GOST](https://gost.run/en/tutorials/protocols/relay/) آمده است.
+در این حالت AnyTLS-Go روی یک سرور می‌ماند و کلاینت‌ها به سرور دیگری وصل می‌شوند. فقط روی سرور مقصد AnyTLS-Go نصب می‌شود. روی هر دو سرور GOST اجرا می‌شود: Relay روی سرور ورودی کلاینت قرار می‌گیرد و Agent از سرور AnyTLS-Go به Relay اتصال خروجی می‌زند و پورت ورودی را به AnyTLS-Go فوروارد می‌کند. قابلیت Relay BIND در GOST پورت ورودی را از راه دور ایجاد می‌کند. پنل Relay را با TLS و نام‌کاربری و رمز تصادفی اجرا می‌کند. جزئیات این روش در [مستند رسمی Relay در GOST](https://gost.run/en/tutorials/protocols/relay/) آمده است.
+
+برای نمونه، اگر AnyTLS-Go روی ایران است و می‌خواهید کلاینت‌ها به آلمان وصل شوند:
 
 ~~~text
-کلاینت AnyTLS → IP ایران:پورت ورودی → Relay روی ایران → اتصال خروجی Agent در خارج → 127.0.0.1:پورت AnyTLS
+کلاینت AnyTLS → IP عمومی آلمان:پورت ورودی → GOST Relay روی آلمان → اتصال خروجی GOST Agent روی ایران → 127.0.0.1:پورت AnyTLS-Go
 ~~~
 
 دو نقش را جداگانه تنظیم کنید:
 
-1. در سرور ایران، **GOST forwarding management → Set up or update reverse GOST tunnel → Configure Iran relay server** را انتخاب کنید. نام‌کاربری و رمز ساخته‌شده را نگه دارید. پورت کنترل TCP (پیش‌فرض `8444`) را در فایروال ایران و ارائه‌دهنده فقط برای IP عمومی سرور خارج باز کنید.
-2. در سرور خارج که AnyTLS روی آن اجراست، **GOST forwarding management → Set up or update reverse GOST tunnel → Configure foreign AnyTLS server agent** را انتخاب کنید. آدرس ایران، پورت کنترل و مشخصات ورود، پورت ورودی کلاینت در ایران و پورت محلی AnyTLS را وارد کنید. پورت ورودی و پورت AnyTLS هر دو به‌طور پیش‌فرض `8443` هستند.
-3. پورت ورودی ایران را در فایروال سرور و ارائه‌دهنده برای کلاینت‌ها باز کنید. در پروفایل AnyTLS، IP عمومی ایران و پورت ورودی را قرار دهید و رمز AnyTLS را بدون تغییر نگه دارید.
+1. در سروری که کلاینت‌ها به آن وصل می‌شوند (در این مثال آلمان)، مسیر **GOST forwarding management → Set up or update reverse GOST tunnel → Configure Relay server (client entry point)** را انتخاب کنید. نام‌کاربری و رمز ساخته‌شده را نگه دارید. پورت کنترل TCP (پیش‌فرض `8444`) را در فایروال سرور Relay و ارائه‌دهنده فقط برای IP سرور Agent باز کنید.
+2. در سروری که AnyTLS-Go روی آن اجراست (در این مثال ایران)، مسیر **GOST forwarding management → Set up or update reverse GOST tunnel → Configure reverse Agent (AnyTLS backend)** را انتخاب کنید. آدرس Relay، پورت کنترل و مشخصات ورود، پورت ورودی کلاینت روی Relay، و آدرس و پورت AnyTLS-Go را وارد کنید. پورت ورودی و پورت مقصد پیش‌فرض `8443` و آدرس مقصد پیش‌فرض `127.0.0.1` است.
+3. پورت ورودی کلاینت را در فایروال Relay و ارائه‌دهنده برای کاربران باز کنید. در پروفایل AnyTLS، IP عمومی Relay (در این مثال آلمان) و پورت ورودی را قرار دهید؛ رمز AnyTLS-Go ایران بدون تغییر می‌ماند.
 
-در این روش Agent از خارج به ایران وصل می‌شود؛ بنابراین پورت کنترل ایران باید از سرور خارج قابل‌دسترسی باشد. اگر امکان دارد، دسترسی آن را در فایروال به IP سرور خارج محدود کنید. مشخصات Relay و تنظیمات GOST در فایلی با دسترسی محدود ذخیره می‌شوند. TLS دادهٔ تونل را رمز می‌کند، اما Agent گواهی خودکار GOST را بررسی نمی‌کند؛ محدودکردن دسترسی پورت کنترل به IP مبدأ توصیه می‌شود. انتخاب هرکدام از حالت‌های GOST، تنظیم سرویس `anytls-tunnel` همان سرور را جایگزین می‌کند؛ Relay ایران و Agent خارج را روی سرورهای مربوط به خود تنظیم کنید.
+Agent اتصال را به Relay آغاز می‌کند؛ بنابراین فایروال Relay باید پورت کنترل را از IP سرور Agent بپذیرد. اگر امکان دارد این پورت را به IP سرور Agent محدود کنید. اطلاعات Relay و تنظیمات GOST در فایلی با دسترسی محدود ذخیره می‌شوند. TLS دادهٔ Relay را رمز می‌کند، اما Agent گواهی خودکار GOST را بررسی نمی‌کند؛ محدودکردن دسترسی پورت کنترل به IP مبدأ توصیه می‌شود. انتخاب هرکدام از حالت‌های GOST، تنظیم سرویس `anytls-tunnel` همان سرور را جایگزین می‌کند؛ Relay و Agent را روی سرورهای مربوط به خود تنظیم کنید.
 
 ## ساخت پروفایل کلاینت
 
 سرور با پیاده‌سازی اصلی AnyTLS-Go و یک رمز مشترک اجرا می‌شود. نصب تازه یک رمز تصادفی ۳۲ کاراکتری می‌سازد و آن را یک‌بار برای ذخیره‌کردن نشان می‌دهد؛ رمز در تنظیمات فقط‌خواندنی برای root ذخیره می‌شود. با تغییر IP شنود یا پورت، رمز تصادفی تازه‌ای هم ساخته و ذخیره می‌شود و یک‌بار نمایش داده می‌شود. پروفایل‌های قبلی پس از این تغییر کار نمی‌کنند؛ از گزینهٔ ۳، QR/JSON تازه بسازید. پنل برای NekoBox لینک و QR و برای sing-box در Android، iOS و Windows فایل JSON می‌سازد. نام پروفایل در QR و تگ outbound فایل JSON برابر `AnyTLS-Go` است و نام هر فایل `AnyTLS-Go.json` در پوشهٔ پلتفرم مربوطه خواهد بود.
 
-برای اتصال مستقیم IP سرور خارج را وارد کنید؛ اگر فوروارد GOST روی ایران دارید، IP عمومی ایران را وارد کنید. برای NekoBox، QR یا لینک AnyTLS را وارد کنید. فایل‌های JSON پیکربندی کامل sing-box هستند: `tls.insecure`، ALPN برابر `h2` و `http/1.1`، fingerprint متناسب با دستگاه (`android`، `ios` یا `chrome` برای Windows) و DNS از مسیر AnyTLS را تنظیم می‌کنند. NekoBox از JSONهای sing-box فقط outbound را وارد می‌کند و قوانین مسیریابی را نادیده می‌گیرد؛ تست URL آن نیز DNS مستقیم دارد. به همین دلیل ممکن است خطای `cp.cloudflare.com` یا `missing default interface` در تست باقی بماند. خطای تست به‌تنهایی ثابت نمی‌کند اتصال AnyTLS برقرار نشده؛ پس از اتصال، یک سایت را در مرورگر باز کنید. SNI پیش‌فرض `www.cloudflare.com` است؛ در صورت داشتن دامنهٔ خودتان آن را جایگزین کنید. SNI اتصال را از مسیر Cloudflare عبور نمی‌دهد و عبور از فیلترینگ را تضمین نمی‌کند. گزینهٔ `tls.insecure` بررسی گواهی را غیرفعال می‌کند و می‌تواند اتصال را در برابر رهگیری آسیب‌پذیر کند. تقلید uTLS نیز تضمینی برای شناسایی‌نشدن ترافیک نیست.
+برای اتصال مستقیم، IP سرور AnyTLS-Go را وارد کنید؛ در فوروارد مستقیم GOST از ایران، IP ایران را وارد کنید؛ در تونل معکوس، IP عمومی سرور Relay را وارد کنید (در مثال بالا آلمان). برای NekoBox، QR یا لینک AnyTLS را وارد کنید. فایل‌های JSON پیکربندی کامل sing-box هستند: `tls.insecure`، ALPN برابر `h2` و `http/1.1`، fingerprint متناسب با دستگاه (`android`، `ios` یا `chrome` برای Windows) و DNS از مسیر AnyTLS را تنظیم می‌کنند. NekoBox از JSONهای sing-box فقط outbound را وارد می‌کند و قوانین مسیریابی را نادیده می‌گیرد؛ تست URL آن نیز DNS مستقیم دارد. به همین دلیل ممکن است خطای `cp.cloudflare.com` یا `missing default interface` در تست باقی بماند. خطای تست به‌تنهایی ثابت نمی‌کند اتصال AnyTLS برقرار نشده؛ پس از اتصال، یک سایت را در مرورگر باز کنید. SNI پیش‌فرض `www.cloudflare.com` است؛ در صورت داشتن دامنهٔ خودتان آن را جایگزین کنید. SNI اتصال را از مسیر Cloudflare عبور نمی‌دهد و عبور از فیلترینگ را تضمین نمی‌کند. گزینهٔ `tls.insecure` بررسی گواهی را غیرفعال می‌کند و می‌تواند اتصال را در برابر رهگیری آسیب‌پذیر کند. تقلید uTLS نیز تضمینی برای شناسایی‌نشدن ترافیک نیست.
 
 اگر سروری هنوز از بک‌اند قدیمی sing-box چندکاربره استفاده می‌کند، از مسیر **AnyTLS server management → Restore AnyTLS-Go single-user mode** برگردید. رمز اولین حساب فعال به رمز مشترک AnyTLS-Go تبدیل می‌شود و تنظیمات و خروجی‌های sing-box در پوشهٔ پشتیبان نگه داشته می‌شوند.
 
