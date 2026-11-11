@@ -292,7 +292,7 @@ value = match.group(1) if match else ""
 print(value.rsplit(":", 1)[-1].rstrip("]"))
 PY
 )"
-  printf 'Create both AnyTLS-Go profiles using this server’s saved password:\n'
+  printf 'Run this export on the Germany server. Both profiles use this server’s saved AnyTLS-Go password:\n'
   printf '  Germany direct: clients connect to the Germany server without GOST.\n'
   printf '  Iran GOST tunnel: clients connect to Iran and GOST forwards to this Germany server.\n\n'
   read_valid 'Germany public IP or DNS name (direct profile)' '' valid_host germany_ip
@@ -328,7 +328,7 @@ PY
   printf '\n%sGermany direct — Server %s:%s%s\n' "$CYAN" "$germany_ip" "$direct_port" "$RESET"
   printf 'QR image:   %s\nAndroid:    %s\niOS:        %s\nWindows:    %s\n' \
     "${direct_info[4]}" "${direct_info[1]}" "${direct_info[2]}" "${direct_info[3]}"
-  printf '\nThe QR/link and JSON files use the profile name AnyTLS-Go. The tunnel port must equal the client-entry port exposed by GOST on Iran. These files contain the AnyTLS password; treat them as login credentials. NekoBox URL tests may still show a DNS/default-interface warning even when the proxy works.\n'
+  printf '\nThe QR/link and JSON files use the profile name AnyTLS-Go. The Iran profile works with either direct or reverse GOST when that mode is active on Iran; only one GOST mode can be active on this host at a time. Its port must equal the client-entry port exposed by GOST on Iran. These files contain the AnyTLS password; treat them as login credentials. NekoBox URL tests may still show a DNS/default-interface warning even when the proxy works.\n'
   printf '\nSelect what to print in this terminal for copying or scanning:\n'
   menu_item 1 'Show Iran GOST tunnel QR'
   menu_item 2 'Show Germany direct QR'
