@@ -331,7 +331,7 @@ PY
           "${export_info[1]}" "${export_info[2]}" "${export_info[3]}"
         if [[ -n "$qr_path" ]]; then
           printf 'QR image:     %s\n\n' "$qr_path"
-          printf 'The QR contains only an AnyTLS link. Import the Android JSON profile to route DNS through AnyTLS; this avoids direct DNS lookups that can fail with a missing default interface. JSON also retains ALPN and the device-specific uTLS fingerprint.\n\n'
+          printf 'Use the AnyTLS QR/link in NekoBox. The JSON DNS route applies to full sing-box configs; NekoBox imports only the outbound and its URL test uses direct DNS, so a missing-default-interface test error may remain. A failed URL test alone does not prove the proxy is down.\n\n'
           qrencode -t ANSIUTF8 "$uri"
         else
           printf '\n%sNo QR image was created. Install qrencode and retry if you also need a QR code.%s\n' "$YELLOW" "$RESET"
@@ -499,7 +499,7 @@ PY
   fi
   printf '\nAndroid JSON: %s\niOS JSON:     %s\nWindows JSON: %s\n' \
     "${export_info[1]}" "${export_info[2]}" "${export_info[3]}"
-  printf '\nThe QR link contains only the AnyTLS server details. Import the Android JSON profile to route DNS through AnyTLS; this avoids direct DNS lookups that can fail with a missing default interface. JSON also retains ALPN and the device-specific uTLS fingerprint. Treat these files and the QR as login credentials.\n'
+  printf '\nUse the AnyTLS QR/link in NekoBox. The JSON DNS route applies to full sing-box configs; NekoBox imports only the outbound and its URL test uses direct DNS, so a missing-default-interface test error may remain. A failed URL test alone does not prove the proxy is down. Treat these files and the QR as login credentials.\n'
   printf '\nSelect a profile to print as plain JSON for copying:\n'
   menu_item 1 'Show Android JSON'
   menu_item 2 'Show iOS JSON'
