@@ -7,6 +7,7 @@ readonly ANYTLS_UNIT='anytls'
 readonly ANYTLS_CONFIG='/etc/anytls/anytls.env'
 readonly CLIENT_CONFIG_HELPER='/usr/local/bin/anytls-client-config.py'
 readonly CLIENT_DIR='/root/anytls-clients'
+readonly CLIENT_EXPORT_SETTINGS='/root/anytls-clients/export-settings.json'
 readonly INSTALLER_FILE='/usr/local/libexec/anytls-installer'
 readonly TUNNEL_UNIT='anytls-tunnel'
 readonly TUNNEL_USER='anytls-tunnel'
@@ -266,9 +267,60 @@ PY
   pause
 }
 
+load_client_export_settings() {
+  python3 - "$CLIENT_EXPORT_SETTINGS" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as source:
+        settings = json.load(source)
+    keys = ("abroad_ip", "iran_ip", "direct_port", "tunnel_port", "sni")
+    values = [settings[key] for key in keys]
+    if not all(isinstance(value, str) and value and "\n" not in value and "\r" not in value for value in values):
+        raise ValueError("invalid export settings")
+except (OSError, ValueError, KeyError, TypeError):
+    raise SystemExit(1)
+
+print("\n".join(values))
+PY
+}
+
+save_client_export_settings() {
+  python3 - "$CLIENT_EXPORT_SETTINGS" "$1" "$2" "$3" "$4" "$5" <<'PY'
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+destination = Path(sys.argv[1])
+destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+os.chmod(destination.parent, 0o700)
+settings = dict(zip(("abroad_ip", "iran_ip", "direct_port", "tunnel_port", "sni"), sys.argv[2:]))
+fd, temporary = tempfile.mkstemp(prefix=".export-settings.", dir=destination.parent)
+try:
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as output:
+        json.dump(settings, output, indent=2)
+        output.write("\n")
+    os.replace(temporary, destination)
+except BaseException:
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+    try:
+        os.unlink(temporary)
+    except OSError:
+        pass
+    raise
+PY
+}
+
 client_export_menu() {
-  local germany_ip iran_ip direct_port tunnel_port sni default_port direct_text tunnel_text show_choice
-  local -a direct_info tunnel_info
+  local abroad_ip iran_ip direct_port tunnel_port sni default_port direct_text tunnel_text show_choice saved_choice saved=0
+  local -a direct_info tunnel_info saved_settings
   if ! unit_installed "$ANYTLS_UNIT" || [[ ! -f "$ANYTLS_CONFIG" ]]; then
     printf '%sInstall the AnyTLS-Go server before exporting client profiles.%s\n' "$YELLOW" "$RESET"
     pause
@@ -292,18 +344,65 @@ value = match.group(1) if match else ""
 print(value.rsplit(":", 1)[-1].rstrip("]"))
 PY
 )"
-  printf 'Run this export on the Germany server. Both profiles use this server’s saved AnyTLS-Go password:\n'
-  printf '  Germany direct: clients connect to the Germany server without GOST.\n'
-  printf '  Iran GOST tunnel: clients connect to Iran and GOST forwards to this Germany server.\n\n'
-  read_valid 'Germany public IP or DNS name (direct profile)' '' valid_host germany_ip
-  read_valid 'Iran public IP or DNS name (GOST tunnel profile)' '' valid_host iran_ip
-  direct_port="$default_port"
-  printf 'Germany AnyTLS-Go listening port: %s\n' "$direct_port"
-  read_valid 'Iran GOST client-entry port (must match the Agent setup)' "$direct_port" valid_port tunnel_port
-  read -r -p 'TLS server name/SNI [www.cloudflare.com]: ' sni
-  sni="${sni:-www.cloudflare.com}"
-  if ! direct_text="$("$CLIENT_CONFIG_HELPER" export --variant germany-direct --server "$germany_ip" --port "$direct_port" --sni "$sni")"; then
-    fail 'Could not export the Germany direct profiles.'
+  if [[ -f "$CLIENT_EXPORT_SETTINGS" ]]; then
+    mapfile -t saved_settings < <(load_client_export_settings 2>/dev/null || true)
+    if (( ${#saved_settings[@]} == 5 )) && valid_host "${saved_settings[0]}" && valid_host "${saved_settings[1]}" && valid_port "${saved_settings[2]}" && valid_port "${saved_settings[3]}" && valid_host "${saved_settings[4]}"; then
+      saved=1
+    fi
+  fi
+  if (( saved )); then
+    printf 'Last saved export settings (password is read from the current AnyTLS-Go server settings):\n'
+    printf '  Abroad direct address: %s\n  Iran tunnel address:   %s\n  AnyTLS port:           %s\n  Iran entry port:       %s\n  SNI:                   %s\n\n' \
+      "${saved_settings[0]}" "${saved_settings[1]}" "${saved_settings[2]}" "${saved_settings[3]}" "${saved_settings[4]}"
+    if valid_port "$default_port" && [[ "$default_port" != "${saved_settings[2]}" ]]; then
+      printf '%sCurrent AnyTLS-Go listener port is %s; the saved direct profile uses port %s.%s\n\n' "$YELLOW" "$default_port" "${saved_settings[2]}" "$RESET"
+    fi
+    menu_item 1 'Reuse these values and regenerate both profiles'
+    menu_item 2 'Enter new export settings'
+    menu_item 0 'Back'
+    while true; do
+      read -r -p 'Select an option: ' saved_choice
+      case "$saved_choice" in
+        0|1|2) break ;;
+        *) printf '%sInvalid option.%s\n' "$YELLOW" "$RESET" ;;
+      esac
+    done
+    case "$saved_choice" in
+      0) return ;;
+      1)
+        abroad_ip="${saved_settings[0]}"
+        iran_ip="${saved_settings[1]}"
+        direct_port="${saved_settings[2]}"
+        tunnel_port="${saved_settings[3]}"
+        sni="${saved_settings[4]}"
+        ;;
+      2) saved=0 ;;
+    esac
+  else
+    printf 'No valid saved export settings were found. Enter the values for both profiles.\n'
+  fi
+  if (( ! saved )); then
+    printf '\nBoth profiles use the current AnyTLS-Go password saved on this server.\n'
+    printf '  Abroad direct: clients connect to the abroad server without GOST.\n'
+    printf '  Iran GOST tunnel: clients connect to Iran and GOST forwards to this abroad server.\n\n'
+    read_valid 'Abroad public IP or DNS name (direct profile)' '' valid_host abroad_ip
+    read_valid 'Iran public IP or DNS name (GOST tunnel profile)' '' valid_host iran_ip
+    if valid_port "$default_port"; then
+      direct_port="$default_port"
+      printf 'AnyTLS-Go listening port: %s\n' "$direct_port"
+    else
+      read_valid 'AnyTLS-Go listening port' '' valid_port direct_port
+    fi
+    read_valid 'Iran GOST client-entry port (must match the Agent setup)' "$direct_port" valid_port tunnel_port
+    read_valid 'TLS server name/SNI' 'www.cloudflare.com' valid_host sni
+  fi
+  if ! save_client_export_settings "$abroad_ip" "$iran_ip" "$direct_port" "$tunnel_port" "$sni"; then
+    fail 'Could not securely save the export settings. No profiles were generated.'
+    pause
+    return
+  fi
+  if ! direct_text="$("$CLIENT_CONFIG_HELPER" export --variant abroad-direct --server "$abroad_ip" --port "$direct_port" --sni "$sni")"; then
+    fail 'Could not export the abroad direct profiles.'
     pause
     return
   fi
@@ -318,26 +417,26 @@ PY
   (( ${#tunnel_info[@]} == 5 )) || { fail 'The tunnel profile exporter returned incomplete information.'; pause; return; }
   if command -v qrencode >/dev/null 2>&1; then
     qrencode -t PNG -s 6 -o "${tunnel_info[4]}" "${tunnel_info[0]}" || fail 'Iran tunnel JSON files were created, but its QR image could not be generated.'
-    qrencode -t PNG -s 6 -o "${direct_info[4]}" "${direct_info[0]}" || fail 'Germany direct JSON files were created, but its QR image could not be generated.'
+    qrencode -t PNG -s 6 -o "${direct_info[4]}" "${direct_info[0]}" || fail 'Abroad direct JSON files were created, but its QR image could not be generated.'
   else
     printf '\n%sqrencode is unavailable; JSON files were created without QR images.%s\n' "$YELLOW" "$RESET"
   fi
   printf '\n%sIran GOST tunnel — Server %s:%s%s\n' "$CYAN" "$iran_ip" "$tunnel_port" "$RESET"
   printf 'QR image:   %s\nAndroid:    %s\niOS:        %s\nWindows:    %s\n' \
     "${tunnel_info[4]}" "${tunnel_info[1]}" "${tunnel_info[2]}" "${tunnel_info[3]}"
-  printf '\n%sGermany direct — Server %s:%s%s\n' "$CYAN" "$germany_ip" "$direct_port" "$RESET"
+  printf '\n%sAbroad direct — Server %s:%s%s\n' "$CYAN" "$abroad_ip" "$direct_port" "$RESET"
   printf 'QR image:   %s\nAndroid:    %s\niOS:        %s\nWindows:    %s\n' \
     "${direct_info[4]}" "${direct_info[1]}" "${direct_info[2]}" "${direct_info[3]}"
   printf '\nThe QR/link and JSON files use the profile name AnyTLS-Go. The Iran profile works with either direct or reverse GOST when that mode is active on Iran; only one GOST mode can be active on this host at a time. Its port must equal the client-entry port exposed by GOST on Iran. These files contain the AnyTLS password; treat them as login credentials. NekoBox URL tests may still show a DNS/default-interface warning even when the proxy works.\n'
   printf '\nSelect what to print in this terminal for copying or scanning:\n'
   menu_item 1 'Show Iran GOST tunnel QR'
-  menu_item 2 'Show Germany direct QR'
+  menu_item 2 'Show abroad direct QR'
   menu_item 3 'Show Iran tunnel Android JSON'
-  menu_item 4 'Show Germany direct Android JSON'
+  menu_item 4 'Show abroad direct Android JSON'
   menu_item 5 'Show Iran tunnel iOS JSON'
-  menu_item 6 'Show Germany direct iOS JSON'
+  menu_item 6 'Show abroad direct iOS JSON'
   menu_item 7 'Show Iran tunnel Windows JSON'
-  menu_item 8 'Show Germany direct Windows JSON'
+  menu_item 8 'Show abroad direct Windows JSON'
   menu_item 0 'Skip'
   while true; do
     read -r -p 'Select an option: ' show_choice
@@ -354,15 +453,15 @@ PY
       ;;
     2)
       header
-      printf 'Germany direct — scan this AnyTLS-Go QR in NekoBox:\n\n'
+      printf 'Abroad direct — scan this AnyTLS-Go QR in NekoBox:\n\n'
       if command -v qrencode >/dev/null 2>&1; then qrencode -t ANSIUTF8 "${direct_info[0]}"; else fail 'qrencode is not installed; use the PNG path or install qrencode.'; fi
       ;;
     3) header; printf 'Iran GOST tunnel — Android sing-box JSON:\n\n'; cat "${tunnel_info[1]}" ;;
-    4) header; printf 'Germany direct — Android sing-box JSON:\n\n'; cat "${direct_info[1]}" ;;
+    4) header; printf 'Abroad direct — Android sing-box JSON:\n\n'; cat "${direct_info[1]}" ;;
     5) header; printf 'Iran GOST tunnel — iOS sing-box JSON:\n\n'; cat "${tunnel_info[2]}" ;;
-    6) header; printf 'Germany direct — iOS sing-box JSON:\n\n'; cat "${direct_info[2]}" ;;
+    6) header; printf 'Abroad direct — iOS sing-box JSON:\n\n'; cat "${direct_info[2]}" ;;
     7) header; printf 'Iran GOST tunnel — Windows sing-box JSON:\n\n'; cat "${tunnel_info[3]}" ;;
-    8) header; printf 'Germany direct — Windows sing-box JSON:\n\n'; cat "${direct_info[3]}" ;;
+    8) header; printf 'Abroad direct — Windows sing-box JSON:\n\n'; cat "${direct_info[3]}" ;;
     0) ;;
   esac
   unset direct_text tunnel_text direct_info tunnel_info
@@ -946,7 +1045,7 @@ setup_reverse() {
   header
   printf '%sReverse TCP tunnel setup with GOST%s\n\n' "$GREEN" "$RESET"
   printf 'Configure the Relay on the client-facing server, then configure the Agent on the server running AnyTLS-Go. Both roles use the anytls-tunnel service name on their respective hosts.\n'
-  printf 'For AnyTLS-Go on Germany with clients using the Iran IP: Relay on Iran, Agent on Germany.\n'
+  printf 'For AnyTLS-Go abroad with clients using the Iran IP: Relay on Iran, Agent abroad.\n'
   printf 'Setting up a role replaces the existing GOST mode on that server.\n\n'
   menu_item 1 'Configure Relay server (client entry point)'
   menu_item 2 'Configure reverse Agent (AnyTLS backend)'

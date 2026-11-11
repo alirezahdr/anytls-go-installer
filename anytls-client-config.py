@@ -119,7 +119,7 @@ def main():
     export_parser.add_argument("--server", required=True)
     export_parser.add_argument("--port", required=True, type=int)
     export_parser.add_argument("--sni", default=DEFAULT_SNI)
-    export_parser.add_argument("--variant", required=True, choices=("iran-gost-tunnel", "germany-direct"))
+    export_parser.add_argument("--variant", required=True, choices=("iran-gost-tunnel", "abroad-direct"))
     args = parser.parse_args()
     try:
         export(args.server, args.port, args.sni, args.variant)
